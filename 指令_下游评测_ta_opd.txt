@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# ============================================================
+# 指令草稿（AI 辅助生成，需本人审阅 / 填写 / 认领后使用）
+# 目标：TA-OPD 下游评测，复现论文 Table 3 的 6 基准（对照 Base / Full OPD / TA-OPD）
+#       基准：AIME24, AIME25, GPQA-Diamond, HumanEval, IFEval, MATH-500
+#       论文：每 checkpoint 用 5 个 eval seed，报 mean±std（EvalScope；本仓库用 lm-eval 实现）
+# 前置：指令_权重转换_ta_opd.txt 已完成（已有训练产物 pure_opd / ta_opd 的 torch_dist）
+# 用法：填好【填写区】-> bash 本文件；结果在 EVAL_ROOT 下 summary_*.md / .csv
+# 遵循经验规则：本文件提交 git，远程 git pull 后执行；长脚本带 done-flag 可断点续跑
+# ============================================================
+set -euo pipefail
+
+# ---------- 【填写区】路径（与前面指令一致） ----------
+CODE_ROOT=/path/to/code
+TAOPD_DIR=${CODE_ROOT}/TA-OPD
+SLIME_DIR=${TAOPD_DIR}/slime_ta_opd
+OUTPUT_ROOT=/path/to/outputs/slime_opd
+STUDENT_HF=/path/to/models/Qwen3-1.7B/Qwen_Qwen3-1.7B     # 原始 HF（Base + 转换用 origin）
+EVAL_ROOT=${OUTPUT_ROOT}/downstream_eval
+# 评测用的独立 conda 环境（含 lm-eval；仓库脚本里叫 lmeval）
+CONDA_ENV=lmeval
+# HF 缓存（评测要下数据集）
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+export HF_HOME="${HF_HOME:-/path/to/hf_cache}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
+# 5 个 eval seed（论文口径）；若 greedy 评测各 seed 相同属正常，见末尾说明
+SEEDS=(0 1 2 3 4)
+# -------------------------------------------------
+
+mkdir -p "${EVAL_ROOT}"
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "${CONDA_ENV}"
+
+# ===================== PHASE 1: torch_dist -> HF（训练产物才能被 lm-eval 读） =====================
+echo "===== PHASE 1: 转换训练产物为 HF ====="
+convert_one () {  # $1=checkpoint名
+  local ckpt="${OUTPUT_ROOT}/$1"
+  local out="${ckpt}/student_hf"
+  if [ -f "${out}/config.json" ]; then echo "[skip] $1 已转换: ${out}"; return; fi
+  [ -f "${ckpt}/latest_checkpointed_iteration.txt" ] || { echo "[WARN] $1 无 torch_dist，跳过: ${ckpt}"; return; }
+  cd "${SLIME_DIR}"
+  python tools/convert_torch_dist_to_hf.py \
+    --input-dir "${ckpt}" \
+    --output-dir "${out}" \
+    --model-name qwen3 \
+    --origin-hf-dir "${STUDENT_HF}" -f
+  echo "[OK] $1 -> ${out}"
+}
+convert_one pure_opd
+convert_one ta_opd
+# Base 直接用原始 HF，无需转换
+
+# ===================== PHASE 2: 跑 6 基准 × 模型 × 5 seed =====================
+# 模型列表：name|gpu|hf路径
+MODELS=(
+  "base|0|${STUDENT_HF}"
+  "pure_opd|1|${OUTPUT_ROOT}/pure_opd/student_hf"
+  "ta_opd|2|${OUTPUT_ROOT}/ta_opd/student_hf"
+)
+# 6 基准：展示名|lm-eval task（task 名需与你 lm-eval 版本核对）
+BENCHS=(
+  "AIME24|aime24"
+  "AIME25|aime25"
+  "GPQA-D|gpqa_diamond"
+  "HumanEval|humaneval"
+  "IFEval|ifeval"
+  "MATH-500|math_500"
+)
+TASKS=$(IFS=,; echo "${BENCHS[*]}" | sed 's/|/,/g' | awk -F, '{for(i=2;i<=NF;i+=2) printf "%s%s", $i, (i<NF?",":"")}')
+# 上面把 BENCHS 的第2列拼成一个逗号串，作为 --tasks
+
+run_model () {  # $1=name $2=gpu $3=model_path
+  local name="$1" gpu="$2" model="$3"
+  local model_dir="${EVAL_ROOT}/${name}"
+  mkdir -p "${model_dir}"
+  for SEED in "${SEEDS[@]}"; do
+    local seed_dir="${model_dir}/seed${SEED}"
+    local done_flag="${seed_dir}/DONE"
+    [ -f "${done_flag}" ] && { echo "[skip] ${name} seed${SEED}"; continue; }
+    mkdir -p "${seed_dir}"
+    echo "[$(date '+%F %T')] START ${name} seed=${SEED} gpu=${gpu}"
+    set +e
+    CUDA_VISIBLE_DEVICES="${gpu}" timeout 600m lm-eval run \
+      --model hf \
+      --model_args "pretrained=${model},dtype=bfloat16,trust_remote_code=True" \
+      --tasks "${TASKS}" \
+      --device cuda:0 \
+      --batch_size 1 \
+      --seed "${SEED}" \
+      --output_path "${seed_dir}" 2>&1 | tee -a "${model_dir}/eval.log"
+    local ec=${PIPESTATUS[0]}
+    set -e
+    if [ "${ec}" -eq 0 ]; then date '+%F %T' > "${done_flag}"; echo "[OK] ${name} seed=${SEED}"; else echo "[FAIL] ${name} seed=${SEED} ec=${ec}"; fi
+  done
+}
+
+echo "===== PHASE 2: 启动各模型评测（每个模型占一张卡，后台并行） ====="
+PIDS=()
+for entry in "${MODELS[@]}"; do
+  IFS='|' read -r mname mgpu mpath <<< "${entry}"
+  run_model "${mname}" "${mgpu}" "${mpath}" &
+  PIDS+=($!)
+done
+for p in "${PIDS[@]}"; do wait "${p}"; done
+echo "[done] 所有模型评测结束"
+
+# ===================== PHASE 3: 聚合 mean±std，输出 Table 3 风格摘要 =====================
+echo "===== PHASE 3: 聚合 ====="
+python - <<'PY'
+import json, csv, glob, statistics, pathlib
+EVAL_ROOT = "${EVAL_ROOT}"
+SEEDS = [int(s) for s in "${SEEDS[*]}".split()]
+# 展示名 -> lm-eval task（与上面 BENCHS 保持一致）
+BENCH_DISP = ["AIME24","AIME25","GPQA-D","HumanEval","IFEval","MATH-500"]
+BENCH_TASK = ["aime24","aime25","gpqa_diamond","humaneval","ifeval","math_500"]
+MODELS = ["base","pure_opd","ta_opd"]
+# 每个 task 候选指标键（不同 lm-eval 版本键名不同，取第一个存在的）
+CAND = {
+  "aime24": ["exact_match"], "aime25": ["exact_match"],
+  "gpqa_diamond": ["acc_norm","exact_match","acc"],
+  "humaneval": ["pass@1","humaneval_pass@1","pass_at_1"],
+  "ifeval": ["prompt_level_strict_acc","inst_level_strict_acc","exact_match"],
+  "math_500": ["exact_match"],
+}
+def grab(task, res):
+    for k in CAND.get(task, []):
+        if k in res: return res[k]
+    # 退化：打印可用键便于人工修正
+    return f"N/A(keys={list(res.keys())})"
+
+rows = {}  # model -> task -> [values per seed]
+for m in MODELS:
+    rows[m] = {t: [] for t in BENCH_TASK}
+    for s in SEEDS:
+        files = sorted(pathlib.Path(EVAL_ROOT)/m/f"seed{s}"/"results_*.json")
+        if not files:
+            print(f"[WARN] {m} seed{s}: 无 results_*.json，跳过"); continue
+        data = json.loads(files[-1].read_text())
+        results = data.get("results", {})
+        for t in BENCH_TASK:
+            v = grab(t, results.get(t, {}))
+            try: rows[m][t].append(float(v))
+            except: rows[m][t].append(None)
+
+def meanstd(vals):
+    vs = [v for v in vals if v is not None]
+    if not vs: return ("", "")
+    return (f"{statistics.mean(vs):.2f}", f"{statistics.pstdev(vs):.2f}" if len(vs)>1 else "0.00")
+
+# 写 markdown 表（仿 Table 3：Avg + 6 基准）
+lines = ["# TA-OPD 下游评测摘要（mean±std，5 eval seeds）","",
+         "| Model | Avg | AIME24 | AIME25 | GPQA-D | HumanEval | IFEval | MATH-500 |"]
+hdr = "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+lines.append(hdr)
+csv_rows = [["model","avg"]+BENCH_DISP]
+for m in MODELS:
+    means = []
+    cells = [m]
+    avg_vals = []
+    for t in BENCH_TASK:
+        mn, sd = meanstd(rows[m][t])
+        cells.append(f"{mn}±{sd}" if mn!="" else "n/a")
+        if mn!="": avg_vals.append(float(mn))
+    avg = f"{statistics.mean(avg_vals):.2f}" if avg_vals else ""
+    lines.append("| " + " | ".join([m, avg] + cells[1:]) + " |")
+    csv_rows.append([m, avg] + [c for c in cells[1:]])
+print("\n".join(lines))
+# 落盘
+out_md = pathlib.Path(EVAL_ROOT)/"summary_table3.md"; out_md.write_text("\n".join(lines)+"\n")
+with open(pathlib.Path(EVAL_ROOT)/"summary_table3.csv","w",newline="") as f:
+    w=csv.writer(f); w.writerow(csv_rows[0]); w.writerows(csv_rows[1:])
+print(f"\n[OK] 已写出 {out_md} 与 summary_table3.csv")
+print("[注] 若某格显示 N/A(keys=...)，说明该 task 的指标键名与 CAND 不符，按提示的 keys 修正脚本顶部 CAND 即可。")
+PY
+
+echo "===== 下游评测完成 ====="
+echo "对照论文 Table 3：期望 TA-OPD 的 Avg 接近/超过 Pure OPD，且二者都高于 Base（Qwen3-4B->1.7B 组尤为明显）。"

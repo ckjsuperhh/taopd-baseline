@@ -6,7 +6,7 @@
 # 用法：填好【填写区】后，在 slime_ta_opd 所在机器上 bash 本文件
 # 遵循经验规则：本文件提交 git，远程 git pull 后执行；改脚本后 commit+push 再 pull
 # ============================================================
-set -euo pipefail
+set -eo pipefail
 
 # ---------- 【填写区】路径与模型（已按 8x4090 机器填写） ----------
 CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline
@@ -35,7 +35,7 @@ export TEACHER_MODEL STUDENT_HF STUDENT_TORCH_DIST PROMPT_DATA
 export OPD_TOPK_METRICS_K=16                       # K=16，论文统一 support 统计量
 
 # 环境激活（自动探测 conda 安装位置；若 conda 不在 PATH，请改用绝对路径）
-source "$(conda info --base)/etc/profile.d/conda.sh"; set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 activate.d 未定义变量的 nounset 报错
+source "$(conda info --base)/etc/profile.d/conda.sh"; conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 钩子不再报错
 
 run_one () {
   local NAME="$1"; local MASK="$2"; local RATIO="$3"

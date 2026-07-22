@@ -8,7 +8,7 @@
 # 用法：填好【填写区】-> bash 本文件；结果在 EVAL_ROOT 下 summary_*.md / .csv
 # 遵循经验规则：本文件提交 git，远程 git pull 后执行；长脚本带 done-flag 可断点续跑
 # ============================================================
-set -euo pipefail
+set -eo pipefail
 
 # ---------- 【填写区】路径（已按 8x4090 机器填写） ----------
 CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline
@@ -31,7 +31,7 @@ SEEDS=(0 1 2 3 4)
 
 mkdir -p "${EVAL_ROOT}"
 source "$(conda info --base)/etc/profile.d/conda.sh"
-set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 lmeval 环境 activate.d 里未定义变量的 nounset 报错
+conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 钩子不再报错
 
 # ===================== PHASE 1: torch_dist -> HF（训练产物才能被 lm-eval 读） =====================
 echo "===== PHASE 1: 转换训练产物为 HF ====="

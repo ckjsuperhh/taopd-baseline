@@ -6,7 +6,7 @@
 # 用法：填好【填写区】-> bash 本文件；耗时较长（flash-attn/apex 源码编译，数十分钟）
 # 遵循经验规则：本文件提交 git，远程 git pull 后执行
 # ============================================================
-set -euo pipefail
+set -eo pipefail
 
 # ---------- 【填写区】路径（已按 8x4090 机器填写） ----------
 CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline
@@ -37,7 +37,7 @@ export PIP_NO_CACHE_DIR=1
 echo "===== PHASE 0: 创建 conda 环境 ${CONDA_ENV} (py${PYTHON_VER}) ====="
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda create -y -n "${CONDA_ENV}" python=${PYTHON_VER}
-set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 ta_opd 环境 activate.d 里 NVCC_PREPEND_FLAGS 未定义的 nounset 报错
+conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 的 activate.d/deactivate.d 钩子不再报错
 
 # nvcc（flash-attn / apex 源码编译需要，与 CUDA_SHORT 对齐）
 conda install -y -c nvidia cuda-toolkit=${CUDA_SHORT:0:2}.${CUDA_SHORT:2:1}   # 例: 124 -> 12.4

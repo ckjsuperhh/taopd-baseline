@@ -56,8 +56,15 @@ if [ -n "$NVCC_BIN" ]; then
 else
   echo "[WARN] 未找到系统 nvcc，回退 pip 安装 nvidia-cuda-nvcc-cu12（轻量，不触发 conda 钩子）"
   pip install nvidia-cuda-nvcc-cu12 nvidia-cuda-runtime-cu12 nvidia-cuda-cupti-cu12
-  NVCC_BIN="$(python -c 'import nvidia.cuda_nvcc as m,os;print(os.path.join(os.path.dirname(m.__file__),"bin","nvcc"))')"
-  export CUDA_HOME="$(dirname "$(dirname "$NVCC_BIN")")"
+  # nvidia.cuda_nvcc 是命名空间包，__file__ 为 None，改用 site-packages 目录定位 nvcc
+  SITE="$(python -c 'import sysconfig;print(sysconfig.get_path("purelib"))')"
+  NVCC_BIN="$(ls "$SITE"/nvidia/cuda_nvcc/bin/nvcc 2>/dev/null | head -1)"
+  [ -z "$NVCC_BIN" ] && NVCC_BIN="$(find "$SITE"/nvidia -name nvcc -type f 2>/dev/null | head -1)"
+  export CUDA_HOME="$(cd "$(dirname "$(dirname "$NVCC_BIN")")" && pwd)"
+  # 让编译器/链接器也能找到运行时头文件与库（来自 nvidia-cuda-runtime-cu12）
+  export CPATH="${CUDA_HOME}/include:${SITE}/nvidia/cuda_runtime/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib:${SITE}/nvidia/cuda_runtime/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="${SITE}/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 export PATH="${CUDA_HOME}/bin:${PATH}"
 echo "CUDA_HOME=${CUDA_HOME}  nvcc=$(command -v nvcc)"

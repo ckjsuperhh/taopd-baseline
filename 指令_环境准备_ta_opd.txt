@@ -41,6 +41,10 @@ export PIP_CACHE_DIR="${OUTPUT_ROOT}/pip_cache"
 # 必须用带 +cu124 的本地版本号，否则 ==2.5.1 匹配不到已装的 2.5.1+cu124 而误装 CPU 版。
 export PIP_CONSTRAINT="${OUTPUT_ROOT}/torch_constraint.txt"
 printf 'torch==%s+cu%s\n' "${TORCH_VER}" "${CUDA_SHORT}" > "${PIP_CONSTRAINT}"
+# 让所有 pip install 都能从 cu124 索引解析 torch==2.5.1+cu124：该本地版本号只在 PyTorch cu124 索引上
+# 存在、默认 PyPI 没有，否则 flash-attn/apex 等依赖裸 torch 的包会因 "no matching torch" 解析失败。
+# PyPI 仍是主索引（sglang/transformers 等从 PyPI 装），cu124 仅作为补充索引。
+export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
 # ===================== PHASE 0: conda 鐜 =====================
 echo "===== PHASE 0: 鍒涘缓 conda 鐜 ${CONDA_ENV} (py${PYTHON_VER}) ====="

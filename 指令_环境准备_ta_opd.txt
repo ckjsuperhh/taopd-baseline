@@ -56,24 +56,18 @@ if [ -n "$NVCC_BIN" ]; then
     echo "[WARN] 系统 CUDA 版本 <12，可能和 torch cu124 不匹配；如编译 flash-attn/apex 报错请改用 CUDA 12.x"
   fi
 else
-  echo "[WARN] 未找到系统 nvcc，回退 pip 安装 nvidia-cuda-nvcc-cu12（轻量，不触发 conda 钩子）"
-  pip install nvidia-cuda-nvcc-cu12 nvidia-cuda-runtime-cu12 nvidia-cuda-cupti-cu12
-  SITE="$(python -c 'import sysconfig;print(sysconfig.get_path("purelib"))')"
-  echo "[DEBUG] SITE=${SITE}"
-  # nvidia.cuda_nvcc 是命名空间包，__file__ 为 None；用 find 在整个 site-packages 找 nvcc 二进制
-  # 末尾 || true 抵消 set -o pipefail 下 find 偶发非零退出码导致的中断
-  NVCC_BIN="$(find "$SITE" -name nvcc 2>/dev/null | head -1 || true)"
-  echo "[DEBUG] NVCC_BIN=${NVCC_BIN}"
+  echo "[WARN] 未找到系统 nvcc，通过 conda-forge 安装 cuda-nvcc/cuda-cudart/cuda-cupti（提供 nvcc 编译器及运行时，标准做法）"
+  conda install -y -c conda-forge cuda-nvcc cuda-cudart cuda-cupti
+  NVCC_BIN="$(command -v nvcc || true)"
   if [ -z "$NVCC_BIN" ]; then
-    echo "[ERROR] 已 pip 安装 nvidia-cuda-nvcc-cu12，但在 ${SITE} 下找不到 nvcc，请检查该包内容" >&2
-    ls -R "${SITE}/nvidia" 2>/dev/null | head -50 || true
+    echo "[ERROR] conda 安装 cuda-nvcc 后仍找不到 nvcc，请手动排查" >&2
     exit 1
   fi
   export CUDA_HOME="$(cd "$(dirname "$(dirname "$NVCC_BIN")")" && pwd)"
-  # 让编译器/链接器也能找到运行时头文件与库（来自 nvidia-cuda-runtime-cu12）
-  export CPATH="${CUDA_HOME}/include:${SITE}/nvidia/cuda_runtime/include${CPATH:+:$CPATH}"
-  export LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib:${SITE}/nvidia/cuda_runtime/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-  export LD_LIBRARY_PATH="${SITE}/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # 让编译器/链接器也能找到运行时头文件与库（conda cuda 包装在 env 前缀的 include/lib 下）
+  export CPATH="${CUDA_HOME}/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 export PATH="${CUDA_HOME}/bin:${PATH}"
 echo "CUDA_HOME=${CUDA_HOME}  nvcc=$(command -v nvcc)"

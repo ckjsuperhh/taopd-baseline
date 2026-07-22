@@ -58,10 +58,17 @@ if [ -n "$NVCC_BIN" ]; then
 else
   echo "[WARN] 未找到系统 nvcc，回退 pip 安装 nvidia-cuda-nvcc-cu12（轻量，不触发 conda 钩子）"
   pip install nvidia-cuda-nvcc-cu12 nvidia-cuda-runtime-cu12 nvidia-cuda-cupti-cu12
-  # nvidia.cuda_nvcc 是命名空间包，__file__ 为 None，改用 site-packages 目录定位 nvcc
   SITE="$(python -c 'import sysconfig;print(sysconfig.get_path("purelib"))')"
-  NVCC_BIN="$(ls "$SITE"/nvidia/cuda_nvcc/bin/nvcc 2>/dev/null | head -1)"
-  [ -z "$NVCC_BIN" ] && NVCC_BIN="$(find "$SITE"/nvidia -name nvcc -type f 2>/dev/null | head -1)"
+  echo "[DEBUG] SITE=${SITE}"
+  # nvidia.cuda_nvcc 是命名空间包，__file__ 为 None；用 find 在整个 site-packages 找 nvcc 二进制
+  # 末尾 || true 抵消 set -o pipefail 下 find 偶发非零退出码导致的中断
+  NVCC_BIN="$(find "$SITE" -name nvcc 2>/dev/null | head -1 || true)"
+  echo "[DEBUG] NVCC_BIN=${NVCC_BIN}"
+  if [ -z "$NVCC_BIN" ]; then
+    echo "[ERROR] 已 pip 安装 nvidia-cuda-nvcc-cu12，但在 ${SITE} 下找不到 nvcc，请检查该包内容" >&2
+    ls -R "${SITE}/nvidia" 2>/dev/null | head -50 || true
+    exit 1
+  fi
   export CUDA_HOME="$(cd "$(dirname "$(dirname "$NVCC_BIN")")" && pwd)"
   # 让编译器/链接器也能找到运行时头文件与库（来自 nvidia-cuda-runtime-cu12）
   export CPATH="${CUDA_HOME}/include:${SITE}/nvidia/cuda_runtime/include${CPATH:+:$CPATH}"

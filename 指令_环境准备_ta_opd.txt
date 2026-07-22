@@ -46,6 +46,13 @@ printf 'torch==%s+cu%s\n' "${TORCH_VER}" "${CUDA_SHORT}" > "${PIP_CONSTRAINT}"
 # PyPI 仍是主索引（sglang/transformers 等从 PyPI 装），cu124 仅作为补充索引。
 export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
+# TMPDIR 必须与 pip 缓存/产物处于同一文件系统：flash-attn 等会先把预编译 wheel
+# 下载到 TMPDIR，再用 os.link() 硬链接进 pip 缓存目录。若 TMPDIR 落在 /tmp（独立挂载）、
+# 而缓存/产物在 /home（另一设备），硬链接会报 [Errno 18] Invalid cross-device link 导致安装失败。
+# 统一指到 OUTPUT_ROOT 下，保证同设备，彻底规避该报错。
+export TMPDIR="${OUTPUT_ROOT}/tmp"
+mkdir -p "${TMPDIR}"
+
 # ===================== PHASE 0: conda 鐜 =====================
 echo "===== PHASE 0: 鍒涘缓 conda 鐜 ${CONDA_ENV} (py${PYTHON_VER}) ====="
 # 定位 conda：非交互 shell（如 ssh 远程执行）里 conda 可能不在 PATH，尝试常见安装位置

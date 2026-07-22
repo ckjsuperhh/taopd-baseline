@@ -36,12 +36,33 @@ export PIP_NO_CACHE_DIR=1
 # ===================== PHASE 0: conda 环境 =====================
 echo "===== PHASE 0: 创建 conda 环境 ${CONDA_ENV} (py${PYTHON_VER}) ====="
 source "$(conda info --base)/etc/profile.d/conda.sh"
+# 安全网：conda 的 activate.d/deactivate.d 钩子会引用若干未定义变量，先置空避免（即便未开 nounset 也稳住）
+export _CONDA_PYTHON_SYSCONFIGDATA_NAME_USED="${_CONDA_PYTHON_SYSCONFIGDATA_NAME_USED:-}"
 conda create -y -n "${CONDA_ENV}" python=${PYTHON_VER}
-conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 的 activate.d/deactivate.d 钩子不再报错
 
-# nvcc（flash-attn / apex 源码编译需要，与 CUDA_SHORT 对齐）
-conda install -y -c nvidia cuda-toolkit=${CUDA_SHORT:0:2}.${CUDA_SHORT:2:1}   # 例: 124 -> 12.4
-# 若上面 conda 找不到版本，改用系统 CUDA 或 pip 装 nvidia-cuda-nvcc；只要 nvcc --version 对应即可
+# --- CUDA 工具链：优先用机器自带系统 CUDA，跳过 conda 的 nvidia 频道（已弃用、慢、且触发报错钩子） ---
+NVCC_BIN=""
+for cand in "${CUDA_HOME:-}/bin/nvcc" /usr/local/cuda/bin/nvcc "$(command -v nvcc 2>/dev/null)"; do
+  [ -x "$cand" ] && NVCC_BIN="$cand" && break
+done
+if [ -n "$NVCC_BIN" ]; then
+  export CUDA_HOME="$(cd "$(dirname "$(dirname "$NVCC_BIN")")" && pwd)"
+  NV_VER="$(nvcc --version | grep -o 'release [0-9.]*' | head -1)"
+  echo "[OK] 使用系统 CUDA: ${CUDA_HOME} (${NV_VER})"
+  echo "[INFO] 已跳过 conda 安装 cuda-toolkit"
+  if echo "$NV_VER" | grep -q 'release 1[0-1]\.'; then
+    echo "[WARN] 系统 CUDA 版本 <12，可能和 torch cu124 不匹配；如编译 flash-attn/apex 报错请改用 CUDA 12.x"
+  fi
+else
+  echo "[WARN] 未找到系统 nvcc，回退 pip 安装 nvidia-cuda-nvcc-cu12（轻量，不触发 conda 钩子）"
+  pip install nvidia-cuda-nvcc-cu12 nvidia-cuda-runtime-cu12 nvidia-cuda-cupti-cu12
+  NVCC_BIN="$(python -c 'import nvidia.cuda_nvcc as m,os;print(os.path.join(os.path.dirname(m.__file__),"bin","nvcc"))')"
+  export CUDA_HOME="$(dirname "$(dirname "$NVCC_BIN")")"
+fi
+export PATH="${CUDA_HOME}/bin:${PATH}"
+echo "CUDA_HOME=${CUDA_HOME}  nvcc=$(command -v nvcc)"
+
+conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 钩子不再报错
 
 # ===================== PHASE 1: torch + sglang（基准） =====================
 echo "===== PHASE 1: torch ${TORCH_VER}+cu${CUDA_SHORT} + sglang 0.5.10.post1 ====="

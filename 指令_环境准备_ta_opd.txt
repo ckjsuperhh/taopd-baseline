@@ -7,6 +7,7 @@
 # 遵循经验规则：本文件提交 git，远程 git pull 后执行
 # ============================================================
 set -eo pipefail
+trap 'echo "[ABORT] 第 $LINENO 行命令失败，退出码 $?"' ERR   # 任意命令失败即打印位置，便于定位中断点
 
 # ---------- 【填写区】路径（已按 8x4090 机器填写） ----------
 CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline

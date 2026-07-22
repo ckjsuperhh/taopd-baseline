@@ -30,7 +30,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 mkdir -p "${MODELS}" "${DATA_DIR}" "${OUTPUT_ROOT}"
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${CONDA_ENV}"
+set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 ta_opd 环境 activate.d 里 NVCC_PREPEND_FLAGS 未定义的 nounset 报错
 
 # ===================== PHASE 1: 涓嬭浇妯″瀷 =====================
 echo "===== PHASE 1: 涓嬭浇 Qwen3-4B / Qwen3-1.7B ====="

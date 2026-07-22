@@ -35,7 +35,7 @@ export TEACHER_MODEL STUDENT_HF STUDENT_TORCH_DIST PROMPT_DATA
 export OPD_TOPK_METRICS_K=16                       # K=16，论文统一 support 统计量
 
 # 环境激活（自动探测 conda 安装位置；若 conda 不在 PATH，请改用绝对路径）
-source "$(conda info --base)/etc/profile.d/conda.sh"; conda activate "${CONDA_ENV}"
+source "$(conda info --base)/etc/profile.d/conda.sh"; set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 activate.d 未定义变量的 nounset 报错
 
 run_one () {
   local NAME="$1"; local MASK="$2"; local RATIO="$3"

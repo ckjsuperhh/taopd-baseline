@@ -31,7 +31,7 @@ SEEDS=(0 1 2 3 4)
 
 mkdir -p "${EVAL_ROOT}"
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${CONDA_ENV}"
+set +u; conda activate "${CONDA_ENV}"; set -u   # 绕过 lmeval 环境 activate.d 里未定义变量的 nounset 报错
 
 # ===================== PHASE 1: torch_dist -> HF（训练产物才能被 lm-eval 读） =====================
 echo "===== PHASE 1: 转换训练产物为 HF ====="

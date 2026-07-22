@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.log
+*.pid
+*.out
+*.err
+*.jsonl
+*.parquet
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.tar.gz
+outputs/
+checkpoints/
+wandb/
+.DS_Store

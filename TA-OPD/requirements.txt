@@ -1,0 +1,8 @@
+pandas
+numpy
+pyarrow
+torch
+transformers
+aiohttp
+matplotlib
+scikit-learn

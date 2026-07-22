@@ -32,7 +32,9 @@ echo "[$(date '+%F %T')] ENV BUILD START -> log=${ENV_LOG}"
 # 4090 = Ada sm89锛氶檺瀹氱紪璇戞灦鏋勶紝閬垮厤 flash-attn/apex 鍏ㄦ灦鏋勭紪璇戞垨鎶ラ敊
 export TORCH_CUDA_ARCH_LIST="8.9"
 export MAX_JOBS=16
-export PIP_NO_CACHE_DIR=1
+# 启用 pip 缓存（之前 PIP_NO_CACHE_DIR=1 会禁用缓存，导致每次重跑都重新下载已下过的 wheel / git 仓库）
+# 缓存放在产物目录内（已被 .gitignore 排除），既加速重跑又不污染 home 目录
+export PIP_CACHE_DIR="${OUTPUT_ROOT}/pip_cache"
 
 # ===================== PHASE 0: conda 鐜 =====================
 echo "===== PHASE 0: 鍒涘缓 conda 鐜 ${CONDA_ENV} (py${PYTHON_VER}) ====="

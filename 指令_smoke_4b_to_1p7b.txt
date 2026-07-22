@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ============================================================
+# 指令草稿（AI 辅助生成，需本人审阅 / 填写 / 认领后使用）
+# 目标：Qwen3-4B -> Qwen3-1.7B 的 TA-OPD baseline「smoke 打通」
+# 机器：8 x 4090（>=24GB 即可跑这组；teacher 4B + student 1.7B 很轻）
+# 用法：填好【填写区】后，在 slime_ta_opd 所在机器上 bash 本文件
+# 遵循经验规则：本文件提交 git，远程 git pull 后执行；改脚本后 commit+push 再 pull
+# ============================================================
+set -euo pipefail
+
+# ---------- 【填写区】路径与模型（按你机器改） ----------
+SLIME_DIR=/path/to/TA-OPD/slime_ta_opd            # 完整 slime 树（含 examples/on_policy_distillation/）
+MEGATRON_LM_DIR=/path/to/Megatron-LM
+CONDA_SH=/path/to/miniconda3/etc/profile.d/conda.sh
+CONDA_ENV=ta_opd                                  # 与 指令_环境准备_ta_opd.txt 创建的 env 名一致
+FALLBACK_SITE_PACKAGES=/path/to/conda/envs/opsd/lib/python3.10/site-packages  # 转换用；若无则删此行/置空
+
+TEACHER_MODEL=/path/to/models/Qwen3-4B
+STUDENT_HF=/path/to/models/Qwen3-1.7B/Qwen_Qwen3-1.7B
+STUDENT_TORCH_DIST=/path/to/models/Qwen3-1.7B/Qwen_Qwen3-1.7B_torch_dist  # 已转 torch_dist（见前置步骤）
+PROMPT_DATA=/path/to/data/dapo_train.parquet      # DAPO prompts 整理成 parquet，字段名 prompt
+OUTPUT_ROOT=/path/to/outputs/slime_opd
+# -------------------------------------------------------
+
+# 8 卡分配：teacher 占 7；actor 用 0,1（2 卡）；rollout 用 2（1 卡）；3,4,5,6 备用
+export TEACHER_GPU=7
+export RAY_GPUS=0,1,2
+export ACTOR_NUM_GPUS_PER_NODE=2
+export ROLLOUT_NUM_GPUS=1
+export COLOCATE=0
+
+export SLIME_DIR MEGATRON_LM_DIR OUTPUT_ROOT
+export TEACHER_MODEL STUDENT_HF STUDENT_TORCH_DIST PROMPT_DATA
+export OPD_TOPK_METRICS_K=16                       # K=16，论文统一 support 统计量
+
+# 环境激活（与仓库脚本一致：verl 提供 sglang/ray/torch，可 import slime+megatron）
+source "${CONDA_SH}"; conda activate "${CONDA_ENV}"
+
+run_one () {
+  local NAME="$1"; local MASK="$2"; local RATIO="$3"
+  echo "===== SMOKE RUN: ${NAME} (mask=${MASK} ratio=${RATIO}) ====="
+  RUN_NAME="smoke_${NAME}_$(date +%Y%m%d_%H%M%S)" \
+  SAVE_DIR="${OUTPUT_ROOT}/${NAME}" \
+  NUM_ROLLOUT=4 \
+  ROLLOUT_BATCH_SIZE=4 \
+  N_SAMPLES_PER_PROMPT=2 \
+  GLOBAL_BATCH_SIZE=8 \
+  ROLLOUT_MAX_RESPONSE_LEN=1024 \
+  ROLLOUT_TEMPERATURE=1.0 \
+  OPD_BUDGET_MASK="${MASK}" \
+  OPD_BUDGET_RATIO="${RATIO}" \
+  OPD_TOKEN_BANK_PAIR_ID=qwen3_4b_to_qwen3_1p7b \
+  bash "${SLIME_DIR}/examples/on_policy_distillation/run-qwen3-1.7B-sampled-opd-sglang.sh"
+  echo "===== DONE: ${NAME} -> ${OUTPUT_ROOT}/${NAME} ====="
+}
+
+# 1) Full OPD baseline：mask=none（全部 response token 都作直接 OPD 目标）
+run_one pure_opd none 1.0
+
+# 2) TA-OPD：mask=dlearn_high，10% 监督 token 预算
+run_one ta_opd dlearn_high 0.10
+
+echo "SMOKE 完成：检查两个 SAVE_DIR 下是否生成 latest_checkpointed_iteration.txt"
+echo "  ${OUTPUT_ROOT}/pure_opd"
+echo "  ${OUTPUT_ROOT}/ta_opd"

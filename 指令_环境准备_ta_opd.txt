@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# ============================================================
+# 指令草稿（AI 辅助生成，需本人审阅 / 填写 / 认领后使用）
+# 目标：搭建 TA-OPD 训练环境（适配 8 x 4090 / Ada sm89）
+# 依据：TA-OPD/slime_ta_opd/docker/Dockerfile（已据此锁定版本；并去除 Hopper/GB 专属步骤）
+# 用法：填好【填写区】-> bash 本文件；耗时较长（flash-attn/apex 源码编译，数十分钟）
+# 遵循经验规则：本文件提交 git，远程 git pull 后执行
+# ============================================================
+set -euo pipefail
+
+# ---------- 【填写区】路径（按你机器改） ----------
+CODE_ROOT=/path/to/code                       # 放仓库与 Megatron 的根目录
+TAOPD_DIR=${CODE_ROOT}/TA-OPD                 # 已克隆的 TA-OPD 仓库
+SLIME_DIR=${TAOPD_DIR}/slime_ta_opd           # 完整 slime 树（含 train.py / setup.py / docker/patch）
+MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM      # 本脚本会在此 clone + 打 patch
+OUTPUT_ROOT=/path/to/outputs/slime_opd
+# -------------------------------------------------
+
+# CUDA / torch 基准（必须一致；4090 用 CUDA 12.4 + torch 2.5.x 较稳）
+# 若 sglang 装不上 cu124 的 sgl-kernel wheel，把下面两套都改成 cu121 / torch 2.4.0 再试。
+CUDA_SHORT=124            # 用于 pip torch / sgl-kernel 的 cu 后缀
+TORCH_VER=2.5.1
+CONDA_ENV=ta_opd          # 环境名；与后面 smoke 指令的 CONDA_ENV 保持一致
+PYTHON_VER=3.10
+
+ENV_LOG=${OUTPUT_ROOT}/env_build_$(date +%Y%m%d_%H%M%S).log
+mkdir -p "${OUTPUT_ROOT}"
+exec > >(tee -a "${ENV_LOG}") 2>&1
+echo "[$(date '+%F %T')] ENV BUILD START -> log=${ENV_LOG}"
+
+# 4090 = Ada sm89：限定编译架构，避免 flash-attn/apex 全架构编译或报错
+export TORCH_CUDA_ARCH_LIST="8.9"
+export MAX_JOBS=16
+export PIP_NO_CACHE_DIR=1
+
+# ===================== PHASE 0: conda 环境 =====================
+echo "===== PHASE 0: 创建 conda 环境 ${CONDA_ENV} (py${PYTHON_VER}) ====="
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda create -y -n "${CONDA_ENV}" python=${PYTHON_VER}
+conda activate "${CONDA_ENV}"
+
+# nvcc（flash-attn / apex 源码编译需要，与 CUDA_SHORT 对齐）
+conda install -y -c nvidia cuda-toolkit=${CUDA_SHORT:0:2}.${CUDA_SHORT:2:1}   # 例: 124 -> 12.4
+# 若上面 conda 找不到版本，改用系统 CUDA 或 pip 装 nvidia-cuda-nvcc；只要 nvcc --version 对应即可
+
+# ===================== PHASE 1: torch + sglang（基准） =====================
+echo "===== PHASE 1: torch ${TORCH_VER}+cu${CUDA_SHORT} + sglang 0.5.10.post1 ====="
+pip install "torch==${TORCH_VER}" --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+pip install "sglang==0.5.10.post1"
+python -c "import torch, sglang; print('torch', torch.__version__, 'cuda', torch.version.cuda); print('sglang', sglang.__version__)"
+echo "[CHECK] 若 sglang import 报 sgl-kernel wheel 缺失：把 CUDA_SHORT/TORCH_VER 改 cu121/torch2.4.0 重装 PHASE1"
+
+# ===================== PHASE 2: Megatron-LM（锁 commit + 打 patch） =====================
+echo "===== PHASE 2: clone Megatron-LM @1dcf0daf + 应用 megatron.patch ====="
+if [ ! -d "${MEGATRON_LM_DIR}" ]; then
+  git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_LM_DIR}" --recursive
+fi
+cd "${MEGATRON_LM_DIR}"
+git fetch --all
+git checkout 1dcf0dafa884ad52ffb243625717a3471643e087
+git submodule update --init --recursive
+# 应用 TA-OPD 必需的 Megatron patch（slime 的 OPD 代码依赖它）
+PATCH=${SLIME_DIR}/docker/patch/latest/megatron.patch
+if [ -f "${PATCH}" ]; then
+  git apply "${PATCH}" --3way || { echo "megatron.patch 应用失败，请手动解决冲突"; exit 1; }
+  echo "[OK] applied ${PATCH}"
+else
+  echo "未找到 ${PATCH}，请确认 SLIME_DIR 指向 slime_ta_opd"
+  exit 1
+fi
+pip install -e . --no-deps
+echo "[CHECK] import megatron.core"
+python -c "import megatron.core; print('megatron.core OK')"
+
+# ===================== PHASE 3: 编译型依赖（慢） =====================
+echo "===== PHASE 3: flash-attn 2.7.4.post1 + apex（源码编译，耐心等） ====="
+# 仅装 FA2；**不要**装 Dockerfile 里的 flash-attention/hopper（FA3，Hopper 专属，4090 用不了）
+pip install "flash-attn==2.7.4.post1" --no-build-isolation
+pip install "git+https://github.com/NVIDIA/apex.git@10417aceddd7d5d05d7cbf7b0fc2daad1105f8b4" \
+  --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext"
+
+# ===================== PHASE 4: TransformerEngine 2.10（4090 可装 cu12x wheel） =====================
+echo "===== PHASE 4: transformer_engine 2.10.0 ====="
+pip install "transformer_engine[pytorch]==2.10.0" || \
+  echo "[WARN] TE 安装失败；训练脚本已用 --transformer-impl local，前向不依赖 TE，但 Megatron import 可能需要它，请排查"
+
+# ===================== PHASE 5: slime 依赖 + slime 自身 =====================
+echo "===== PHASE 5: slime requirements + pip install -e . ====="
+pip install -r "${TAOPD_DIR}/requirements.txt"
+pip install -r "${SLIME_DIR}/requirements.txt"
+cd "${SLIME_DIR}"
+pip install -e . --no-deps
+# slime 自带的一个 int4 kernel（密集 OPD 非必须，但 Dockerfile 装了，跳过也不影响 baseline）
+( cd "${SLIME_DIR}/slime/backends/megatron_utils/kernels/int4_qat" && pip install . --no-build-isolation ) || \
+  echo "[WARN] int4_qat kernel 安装失败（可选，baseline 可忽略）"
+
+# ===================== PHASE 6: slime 的第三方 git 依赖 =====================
+echo "===== PHASE 6: mbridge / Megatron-Bridge / torch_memory_saver / modelopt ====="
+pip install "git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c" --no-deps
+pip install "git+https://github.com/radixark/Megatron-Bridge.git@bridge" --no-deps --no-build-isolation
+pip install "git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a639" --no-cache-dir --force-reinstall
+pip install "nvidia-modelopt[torch]>=0.37.0" --no-build-isolation
+# flash-linear-attention 0.4.1（可选，MoE/特定特性用）
+pip install "flash-linear-attention==0.4.1" || echo "[WARN] flash-linear-attention 可选"
+# tilelang 的 cu128 wheel 仅当 CUDA==12.8 才匹配；不符则跳过
+# pip install tilelang -f https://tile-ai.github.io/whl/nightly/cu128/ || echo "[WARN] tilelang 跳过（CUDA 不匹配）"
+
+# numpy 必须 <2（Megatron 要求）
+pip install "numpy<2"
+
+# ===================== PHASE 7: 最终验证 =====================
+echo "===== PHASE 7: 验证导入 + GPU ====="
+python - <<'PY'
+import importlib, sys
+mods = ["torch","sglang","ray","megatron.core","transformer_engine","flash_attn",
+        "slime","slime_plugins","apex","mbridge"]
+for m in mods:
+    try:
+        importlib.import_module(m)
+        print(f"  [OK] {m}")
+    except Exception as e:
+        print(f"  [FAIL] {m}: {e}")
+import torch
+print("torch", torch.__version__, "cuda avail:", torch.cuda.is_available(),
+      "device count:", torch.cuda.device_count())
+PY
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+
+echo "===== ENV BUILD DONE ====="
+echo "SLIME_DIR    = ${SLIME_DIR}"
+echo "MEGATRON_LM  = ${MEGATRON_LM_DIR}"
+echo "CONDA_ENV    = ${CONDA_ENV}  (smoke 指令里 CONDA_ENV 请保持一致)"
+echo "下一步：用 指令_权重转换_*.txt 转 student 权重，再跑 指令_smoke_4b_to_1p7b.txt"

@@ -1,0 +1,1099 @@
+                                                                        Not All Disagreement Is Learnable:
+                                                                    Token Teachability in On-Policy Distillation
+                                                          Yuanyi Wang1 , Su Lu1 , Yanggan Gu1 , Pengkai Wang1 , Yifan Yang1 ,
+                                                            Zhaoyi Yan2 , Congkai Xie2 , Jianmin Wu1 , Hongxia Yang1,2,3 * †
+                                                                    1
+                                                                      The Hong Kong Polytechnic University, PolyU
+                                                                    2
+                                                                      InfiX.ai 3 Hong Kong Polytechnic University
+                                                                Daya Bay Technology and Innovation Research Institute
+
+                                                                        Code: https://github.com/wyy-code/TA-OPD
+
+                                                                                                         A        Same raw KL, different learnability                                   Prior work: Q3 = low-entropy with
+                                                                   Abstract                                       Within low-entropy with high-KL tokens, raw KL alone is ambiguous.                  high-KL selector region
+
+
+                                                                                                                 Learnable DL                           teacher             Incompatible DI                        teacher
+arXiv:2605.26844v1 [cs.LG] 26 May 2026
+
+
+
+
+                                                 On-policy distillation (OPD) trains a student                   teacher reweights local support        student             teacher points off support             student
+
+
+                                                 on its own rollouts with token-level teacher
+                                                                                                                     Student local support                                       Student local support
+                                                 supervision. Recent selective OPD methods
+                                                 exploit the non-uniformity of OPD signals by            B        TA-OPD keeps locally learnable supervision
+                                                                                                                  Use support-aligned disagreement rather than raw salience alone.
+
+                                                 prioritizing high-entropy or high-disagreement              1    On-Policy states             2   Top-K support stats      3 Teachability gate          4   Budgeted OPD
+                                                                                                                  student rollout postitions       compute Dl & Ci             score learnable KL            keep top-p postitions
+                                                 tokens. We revisit this principle and ask: which                                                                                                                      keep
+                                                                                                                                                                                                                       support-aligned
+
+
+                                                 token-level teacher signals are actually learn-                                                                                                                       filter
+                                                                                                                                                                               support-aligned                         off-support
+                                                 able? Using a fixed-context diagnostic that                     candidate positions               disagreement D            positions rank higher
+
+
+                                                 measures same-context teacher–student KL re-
+                                                 duction, we show that raw KL disagreement is           Figure 1: Token teachability. A: Low-entropy, high-
+                                                 a coarse proxy for learning value. It conflates        KL tokens can contain learnable disagreement DL ,
+                                                 learnable disagreement, where the teacher as-          which stays within the student’s local support, and in-
+                                                 signs corrective mass to the student’s top-K           compatible disagreement DI , which shifts off support.
+                                                 candidates, with incompatible disagreement,            B: TA-OPD computes disagreement Dt and compati-
+                                                 where the teacher places mass mostly off the           bility Ct , ranks positions by steach = D̃t C̃t , and keeps
+                                                                                                                                        t
+                                                 student’s current support. We formalize this           only high-teachability OPD supervision.
+                                                 local compatibility as token teachability and
+                                                 show that it better predicts fixed-context im-         2026c; Zhang et al., 2025). Compared with off-
+                                                 provement than raw KL alone. Motivated by
+                                                                                                        policy distillation (Zhou et al., 2025; Wang et al.,
+                                                 this finding, we propose Teachability-Aware
+                                                 OPD (TA-OPD), a lightweight token-position             2026e), OPD supervises the student on states that it
+                                                 selection method that applies OPD loss to high-        actually visits, reducing distribution mismatch be-
+                                                 teachability positions without reward models or        tween training and deployment. However, this also
+                                                 verifiers. Across Qwen2.5 and Qwen 3 teacher–          exposes a central challenge: the teacher provides
+                                                 student settings, TA-OPD often surpasses full-         dense supervision at every token, but not every
+                                                 token OPD with only 5% retained tokens and             token-level teacher signal is equally useful.
+                                                 improves over entropy- and divergence-based
+                                                 baselines. Our results reframe selective OPD as
+                                                                                                           Recent work shows that OPD supervision is
+                                                 selecting learnable teacher signals rather than        highly non-uniform (Jin et al., 2026; Wang et al.,
+                                                 merely salient tokens.                                 2026b). Selective OPD therefore allocates token
+                                                                                                        budget to salient positions, such as high-entropy
+                                         1       Introduction                                           tokens or low-entropy tokens with large teacher–
+                                         Knowledge distillation has long been used to trans-            student disagreement (Guo et al., 2026; Xie et al.,
+                                         fer the behavior of a large teacher model to a                 2026; Xu et al., 2026). However, these criteria
+                                         smaller student model (Hinton, 2014; Zhou et al.,              measure uncertainty or disagreement, not the learn-
+                                         2026; Fang et al., 2026). For large language models            ing effect of the induced token-level supervision.
+                                         (LLMs), a particularly effective variant is on-policy          In on-policy training, two tokens with similar KL
+                                         distillation (OPD), which trains a student policy on           disagreement can lead to very different updates,
+                                         its own rollouts using token-level supervision from            depending on how the teacher distribution interacts
+                                         a teacher policy (Agarwal et al., 2024; Gu et al.,             with the student’s current predictive state (Fig 1.A).
+                                             * Corresponding author.
+                                                                                                        This raises a basic question: which token-level
+                                             †
+                                             wangyuanyi713@gmail.com,
+                                                                                                        teacher signals in OPD are actually learnable?
+                                         hongxia.yang@polyu.edu.hk                                         To answer this question, we need to separate
+
+                                                                                                    1
+token-level learning value from the rollout in which        measures same-context KL disagreement and links
+a token appears. End-to-end OPD performance                 pre-update token signals to local OPD improve-
+entangles token supervision with sampling noise,            ment. (ii) using this diagnostic, we formalize
+downstream context shifts, and interactions across          token teachability and show that raw KL dis-
+positions. We therefore introduce a fixed-context           agreement conflates learnable and incompati-
+diagnostic: we collect student-generated prefixes,          ble disagreement; only support-aligned disagree-
+freeze them as a context bank, and rescore both             ment reliably predicts useful learning. (iii) we
+the initial and trained students against the same           propose Teachability-Aware OPD (TA-OPD), a
+teacher distribution. For each token, we measure            lightweight token-position selection method that
+the same-context reduction in teacher–student KL            applies OPD loss to high-teachability positions
+and ask which pre-update disagreement signals pre-          without reward models or verifiers. (iv) we validate
+dict this local improvement. This diagnostic allows         both the finding and the method across Qwen3 and
+us to study whether a token-level teacher signal            Qwen2.5 settings, showing signficant performance
+is aligned with useful learning, rather than merely         with only 5% retained tokens.
+salient under entropy or raw KL.
+   Our diagnostic shows that high KL disagreement           2   Related Work
+is not a uniform learning signal. Even in the low-
+entropy, high-divergence regime targeted by prior           LLM distillation. Knowledge distillation transfers
+selectors, raw disagreement mixes two qualitatively         a stronger teacher model’s behavior to a smaller stu-
+different cases: In learnable disagreement, the             dent by matching outputs, intermediate representa-
+teacher assigns corrective mass to the student’s top-       tions, or generated trajectories (Hinton, 2014; Zhou
+K candidates, yielding high student-support cov-            et al., 2026; Fang et al., 2026). For LLMs, distilla-
+erage and better alignment with KL-disagreement             tion compresses reasoning, instruction-following,
+reduction. In incompatible disagreement, teacher            and alignment capabilities under limited compute
+mass falls mostly outside the student’s current sup-        (Zhou et al., 2025; Wang et al., 2026e). Off-
+port, producing a large KL gap but weak local im-           policy distillation trains on teacher- or human-
+provement. We refer to this local compatibility             generated trajectories, which may diverge from
+between teacher correction and student predictive           student-visited states, while on-policy distillation
+support as token teachability. Fig 1.A illustrates          supervises the student on its own rollouts with
+this distinction.                                           token-level teacher distributions (Agarwal et al.,
+   Motivated by this diagnostic, we reformulate             2024; Gu et al., 2026c; Zhang et al., 2025). We fo-
+selective OPD as selecting learnable supervision            cus on this OPD setting to examine which teacher
+rather than merely salient tokens. We instantiate           signals are truly learnable.
+this principle as Teachability-Aware OPD (TA-               Selective OPD. OPD provides dense token-level su-
+OPD), which scores each response position by                pervision, but recent work shows that useful signal
+support-aligned teacher–student disagreement and            is highly non-uniform (Yang et al., 2026). Entropy-
+applies the OPD loss only to high-teachability po-          based criteria prioritize uncertain tokens (Jin et al.,
+sitions. TA-OPD uses teacher and student token              2026; Guo et al., 2026), and divergence-based cri-
+probabilities available during OPD, optionally ap-          teria highlight positions where the teacher strongly
+proximated with a lightweight top-K support, and            disagrees with the student (Xie et al., 2026; Wang
+requires no reward model or verifier (Fig 1.B).             et al., 2026b). TIP (Xu et al., 2026) formalizes
+   Across Qwen3 and Qwen2.5 teacher–student set-            this with a two-axis taxonomy of student entropy
+tings varying in scale, reasoning ability, and back-        and teacher–student divergence, enabling token-
+bone, TA-OPD shows that token quality can out-              efficient training. Our work complements this line
+weigh token count. With only 5% retained tokens,            by assessing whether informative tokens are also
+TA-OPD often matches or surpasses full-token                learnable, showing that high divergence can mix
+OPD and improves over budget-matched entropy-               support-aligned and off-support supervision.
+and divergence-based methods. These results sup-            Teacher–student compatibility. Distillation qual-
+port our central claim: OPD gains depend on teach-          ity depends on both teacher strength and compati-
+able teacher signals, not merely dense supervision.         bility with the student policy. Recent OPD analyses
+   Our contributions are summarized as follows.             (Li et al., 2026) suggest gains arise from align-
+(i) we introduce a fixed-context diagnostic that            ment on high-probability student tokens and com-
+
+                                                        2
+patible reasoning patterns. Self-distillation (Zhao               3.2   Local-Support Decomposition
+et al., 2026; Agarwal et al., 2024) and context-                  We now ask why high KL can fail to be learn-
+conditioned distillation (Ye et al., 2026; Zhang                  able. At context ct , define the student’s local sup-
+et al., 2026) further emphasize that effective super-             port as its top-K token set StS (K); these are the
+vision depends on information state and trajectory                candidates the student currently considers plau-
+distribution. We operationalize compatibility at                  sible. Let StT (K) be the teacher top-K set and
+the token level by decomposing disagreement into                  Ut = StS (K) ∪ StT (K). We measure local dis-
+learnable and incompatible components, reframing                  agreement on Ut :
+selective OPD as identifying signals that can be                                                       
+absorbed by the student.                                                        Dt = DKL p̄U    t    Ut
+                                                                                               T ∥ p̄θ    ,         (3)
+
+3     Diagnosing Token Teachability                               where p̄Ut is p(· | ct ) renormalized on Ut . To mea-
+This section diagnoses which OPD tokens are ac-                   sure whether the teacher correction is reachable,
+tually learnable. Using TIP’s entropy–KL plane                    define compatibility mass
+as a reference, we focus on Q3, the low-entropy
+                                                                                          X
+                                                                               Ct =             pT (v | ct ).       (4)
+with high-KL region of confident teacher–student
+                                                                                     v∈StS (K)
+disagreement (Xu et al., 2026). We show that Q3
+is heterogeneous: raw KL mixes support-aligned                    High Ct means the teacher mostly reweights tokens
+corrections with off-support mismatch. We first                   already in the student’s local support; low Ct means
+define fixed-context token gain, then decompose                   the teacher points off-support. After robust normal-
+disagreement by local support.                                    ization to [0, 1], we decompose disagreement as
+
+3.1    Fixed-Context Token Gain                                         DtL = D
+                                                                              e tC
+                                                                                 et ,       DtI = D
+                                                                                                  e t (1 − C
+                                                                                                           et ).   (5)
+OPD trains on student-visited contexts ct =                       DtL is learnable disagreement: the correction is
+(x, y<t ), the prefix generated by the current student.           large and locally reachable. DtI is incompatible dis-
+Raw KL at ct does not by itself reveal learning                   agreement: the correction is large but off-support.
+value, since end-to-end performance also depends                  Fig 2A links this split to fixed-context gain, and
+on rollout noise and downstream context changes.                  Fig 2B–C show that Q3 region mixes both signals.
+We therefore freeze a bank of on-policy prefixes                  Thus, teachability measures whether disagreement
+and rescore checkpoints on the same states.                       is locally absorbable, rather than whether the token
+   For pi,t
+         θ = pθ (· | ci,t ), define the empirical token           is uncertain or high-KL. Appendix D gives details.
+gain
+                                                              3.3   Learnable Disagreement Predicts
+                    i,t    i,t              i,t    i,t
+ Gfix
+    i,t =  D KL   p T   ∥ pθ0    − D KL   p T   ∥ pθτ . (1)
+                                                                        Fixed-Context Gain
+                                                                  We next test whether this decomposition predicts
+Positive Gfix
+           i,t means the trained student is closer                Gfix
+                                                                    i,t . For each K, we fit standardized token-level
+to the teacher on the same prefix. This diagnostic                regressions with student entropy, local disagree-
+controls for rollout resampling variance and mea-                 ment, token position, and teacher entropy as con-
+sures local KL reduction rather than answer-level                 trols, and report prompt-cluster bootstrap intervals.
+success.                                                             Fig 3A summarizes the regression evidence.
+Proposition 1 (Gradient alignment) Let Lfix be                    Across K = 8, 16, 32, DL has roughly twice the
+differentiable and β-smooth. Let ℓt be a token OPD                coefficient of DI (0.086–0.087 vs. 0.043–0.045),
+loss. For the update induced by ℓt , let Gt be the                with positive bootstrap gaps (+0.041–+0.044).
+fixed-context loss reduction. Then                                Thus, raw KL is a coarse proxy: it mixes useful
+         Gt = η ⟨∇θ Lfix (θ), ∇θ ℓt (θ)⟩ + Rt ,                   corrections with off-support mismatch, while learn-
+                                                (2)               able disagreement carries the stable gain signal.
+               βη 2
+       |Rt | ≤      ∥∇θ ℓt (θ)∥22 .                               Full analysis are reported in Appendix F.
+                2
+  Thus, useful tokens are not merely high-KL to-                  3.4   The Low-Entropy with High-Divergence
+kens; their gradients must align with fixed-context                     Region is Not Uniformly Teachable
+improvement. Appendices C and I give the diag-                    Following TIP, we use Q3 to denote the low-
+nostic protocol and proof.                                        entropy with high-KL quadrant, where the student
+
+                                                              3
+                      A. gain over decomposition                                             B. Dl in TIP quadrants                                                     C. Di in TIP quadrants
+                1.0                                           4                           1.0                                           1.0                       1.0                                      1.0
+                                                                                               Q3: low H          high H
+                                                                                                                                                                      Q3
+
+
+
+
+                                                                  forward KL percentile
+
+
+
+
+                                                                                                                                          forward KL percentile
+                                                                                          0.8 high KL
+                                                                                                                 high KL                0.8                                                                0.8
+                0.8                                           2                                                                                                   0.8
+Di percentile
+
+
+
+
+                                                                       asinh gain
+                0.6                                                                       0.6                                           0.6                       0.6                                      0.6
+
+
+
+
+                                                                                                                                                 Dl pct.
+
+
+
+
+                                                                                                                                                                                                              Di pct.
+                                                              0
+                0.4                                                                       0.4                                           0.4                       0.4                                      0.4
+                0.2                                               2                       0.2                                                                     0.2
+                                                                                                  low H                  high H         0.2                                                                0.2
+                                                                                                  low KL                 low KL
+                0.0                                               4                       0.0                                           0.0                       0.0                                      0.0
+                      0.00 0.25 0.50 0.75 1.00                                                  0.00 0.25 0.50 0.75 1.00                                                0.00 0.25 0.50 0.75 1.00
+                             Dl percentile                                                       student entropy percentile                                              student entropy percentile
+
+Figure 2: Local-support decomposition. A: fixed-context gain over learnable disagreement DL and incompatible
+disagreement DI . B–C: DL and DI projected onto TIP’s entropy–KL plane; Q3 denotes the low-entropy/high-KL
+region. Teachability separates support-aligned corrections from off-support mismatch within Q3.
+
+                  A      D L explains gain                                                  B Q3 is heterogeneous                                C                 Robust across contexts
+                                                                                  0.04
+        K=8                                           1.9x                                                                        4B held-out                                            +0.078
+                                                                                                same Q3 budget       matched
+                                                                                                 +0.015
+                                                                                                                                   4B GSM8K                                                +0.087
+                                                                                  0.02                                +0.006
+                                                                                                                                  8B teacher                                                           +0.118
+                                                                      gain
+
+
+
+
+    K=16                                              2.0x
+                                                                                  0.00                                              14B K=8                                                       +0.098
+
+                                                                                                                                   14B K=16                                                +0.084
+                                                                             −0.02                                                                                                                     matched
+                                                 DL          DI                                            -0.010                  14B K=32                                              +0.078        bootstrap
+    K=32                                              2.0x
+
+                      0.04     0.06       0.08           0.10                                    hi D L    lo D L        hi D I                   0.00                       0.05          0.10              0.15
+                               std. coefficient                                                                                                                             high-support gain gap
+
+
+
+Figure 3: Fixed-context evidence for token teachability. A: DL has about twice the standardized coefficient
+of DI . B: within Q3, high-DL tokens are beneficial, while low-DL and high-DI tokens are weak or harmful. C:
+high-support gain gaps remain positive across held-out contexts, GSM8K-COT, larger teachers, and support sizes.
+
+
+is confident yet disagrees with the teacher. This                                                                    GSM8K-COT prompts (Cobbe et al., 2021; Gao
+region is a natural target for selective OPD, but                                                                    et al., 2024), and stronger 8B/14B teachers. Fig 3C
+our decomposition asks whether its disagreement                                                                      and Table 1 show positive high-support gaps across
+is uniformly teachable.                                                                                              contexts, teachers, and support sizes, with all main
+   Fig 3B shows that it is not. In a Q3-restricted                                                                   prompt-cluster intervals above zero. This supports
+intervention with matched budgets, high-DL to-                                                                       our claim that teachability is a local property of
+kens yield positive gain, whereas low-DL tokens                                                                      OPD supervision rather than an artifact of one run.
+are negative and high-DI tokens are weak. Thus,                                                                      Appendix E reports the full exact-budget, bucket,
+Q3 is informative but coarse: teachability separates                                                                 and proxy checks.
+learnable high-KL supervision from off-support
+mismatch. Fig 4 controls for token count. Q3+TA                                                                      4       Teachability-Aware OPD
+outperforms TIP, entropy, and random selection un-                                                                   The fixed-context diagnostic in Section 3 suggests
+der exact top-N matching (A–B), the effect holds                                                                     selecting token positions by learnable disagreement
+across support proxies (C), and support mass tracks                                                                  rather than raw salience. We therefore use teacha-
+gain better than raw KL or DI across buckets (D).                                                                    bility as the main selection signal. Student entropy
+Bucket trends further show that support mass tracks                                                                  is kept separate, serving only as a baseline axis and
+gain, while raw KL and incompatible disagreement                                                                     an optional mixture to test complementarity.
+decline. These controls indicate that Q3 needs a
+teachability filter, not merely a larger token budget.                                                               4.1          Budgeted OPD Objective
+                                                                                                                     For a rollout batch, let I be all valid response posi-
+3.5               Robustness Across Contexts and Teachers
+                                                                                                                     tions after padding and trainer masks. At position
+Finally, we test whether the separation depends on                                                                   t, let ct = (x, y<t ) denote the on-policy context,
+a single prompt shard or teacher. We repeat the                                                                      and let pθ (· | ct ) and pT (· | ct ) be the student and
+fixed-context diagnostic on held-out math prompts,                                                                   teacher next-token distributions over vocabulary V .
+
+                                                                                                                 4
+             A. exact top-N                         B. efficiency                                     C. support proxy                               D. bucket trend
+
+  Q3+C                                                                                                       K=16
+                                                                                               0.12                                            0.1                      C mass
+ Q3+TA                                                                                                       K=32
+
+ Q3+KL
+
+
+
+
+                                                                                 Q3 gain gap
+
+
+
+
+                                                                                                                                 gain shift
+ TA-OPD
+                                                                                                                                               0.0
+       KL
+                                                                                               0.06
+       DI
+      TIP                                                                                                                                     −0.1
+      Ent.                                                                                                                                                              DI
+  Rand.                         ● 3%, ■ 5%                                                                                                                              KL
+                                                                                               0.00
+                −0.1     0.0        0.1             −4       0          4                                           ss                               0     1     2     3
+                                                                                                      rlap      ma       CB
+                                                                                                                           C
+                  selected-token gain                     gain / keep                            ove                                                       Q3 bucket
+
+
+
+Figure 4: Q3 controls. A–B: exact top-N comparisons under matched token counts; B reports gain per kept token.
+C: support proxies yield positive high–low gain gaps inside Q3 at K = 16, 32. D: bucket trends (thin: individual
+diagnostics; bold: mean) show support mass tracks gain, whereas raw KL and DI decline.
+
+Table 1: Context and teacher-scale robustness. The gap compares high- vs. low-support tokens inside Q3,
+the low-entropy/high-KL diagnostic region. Bootstrap intervals are prompt-clustered; matched gap denotes the
+prompt-matched estimate. All main 300-context diagnostics have positive intervals.
+
+ Setting                       Context / support             Contexts Tokens Bootstrap gap                                                    95% interval Matched gap
+ Qwen3-4B→1.7B                 held-out math, K = 16                300         57,600                               +0.078    [+0.060, +0.095]                        +0.016
+ Qwen3-4B→1.7B                 GSM8K-COT, K = 16                    300         57,600                               +0.087    [+0.066, +0.109]                        +0.037
+ Qwen3-8B→1.7B                 held-out math, K = 16                300         57,600                               +0.118    [+0.094, +0.144]                        +0.042
+ Qwen3-14B→1.7B                held-out math, K = 8                 300         57,600                               +0.098    [+0.080, +0.117]                        +0.071
+ Qwen3-14B→1.7B                held-out math, K = 16                300         57,600                               +0.084    [+0.069, +0.098]                        +0.058
+ Qwen3-14B→1.7B                held-out math, K = 32                300         57,600                               +0.078    [+0.062, +0.095]                        +0.046
+
+
+Full reverse-KL OPD uses                                                          and let Ut = StS (K) ∪ StT (K). We measure local
+                                                                                  teacher–student disagreement on Ut :
+ℓOPD
+ t   = DKL (pθ (· | ct ) ∥ pT (· | ct ))
+   X                                                                                                                                 
+                                                                                                                Dt = DKL p̄U       Ut
+                                                     
+ =    pθ (v | ct ) log pθ (v | ct ) − log pT (v | ct ) .                                                                   T
+                                                                                                                             t
+                                                                                                                               ∥ p̄θ    ,
+      v∈V                                                                                                                                                                     (9)
+                                                   (6)                                                                          p(v | ct )
+                                                                                                 p̄Ut (v | ct ) = P                            , v ∈ Ut .
+Sampled-token OPD may instead use ℓbOPD       t     =                                                                          u∈Ut p(u | ct )
+log pθ (yt | ct ) − log pT (yt | ct ); our selector is
+agnostic to this estimator. Given a binary mask                                  The forward direction emphasizes teacher-
+mt ∈ {0, 1}, budgeted OPD optimizes                                              preferred candidates underweighted by the student.
+                                                                                 We define student-support coverage as the teacher
+                                1         X                                      probability mass on the student’s top-K support:
+             Lm (θ) = P                         mt ℓOPD
+                                                    t   (θ),        (7)
+                               t∈I mt     t∈I                                                                                  X
+                                                                                                                    Ct =                        pT (v | ct ).                (10)
+with ℓbOPD
+       t    substituted when used by the trainer.                                                                          v∈StS (K)
+This reverse-KL loss is the training objective; the
+fixed-context KL reduction in Section 3 is used                                   High Ct indicates support-aligned correction; low
+only for diagnosis. Token budgets refer to KL-                                    Ct indicates off-support disagreement.
+supervised response positions, not proportional                                      We put all token-level scores on a common scale
+wall-clock savings.                                                               using batch-wise robust normalization. Let IB be
+                                                                                  the valid response positions in rollout batch B. For
+4.2      Teachability Score                                                       a raw score zt at position t, such as Dt or Ct , let
+For each position, define the student and teacher                                 zB = {zj : j ∈ IB }. We define
+top-K sets
+                                                                                               NormB (zt ) =
+        StS (K) = TopK pθ (· | ct ), K ,
+                                       
+                                                                                                                                            (11)
+                                                                                                                                        
+                                              (8)                                                           zt − Q0.05 (zB )
+                                                                                               clip                                , 0, 1 ,
+        StT (K) = TopK pT (· | ct ), K ,
+                                       
+                                                                                                     Q0.95 (zB ) − Q0.05 (zB ) + ϵ
+
+                                                                            5
+where Qq is the q-quantile and ϵ > 0 prevents                Table 2: Fixed-context selector check. G3% and G5%
+division by zero. We apply this operator to dis-             are same-context KL reductions at nominal budgets;
+                                                             G/K normalizes by actual retained ratio (Keep). TA-
+agreement and compatibility:
+                                                             OPD gives the largest reduction and efficiency. C is
+      D
+      e t = NormB (Dt ),      C
+                              et = NormB (Ct ).              teacher mass on student support, and Q3 is TIP’s low-
+                                                             entropy/high-divergence region.
+The teachability score is
+                                                                               labeltab:selector-intervention
+               steach
+                t     = DtL = D
+                              et C
+                                 et .            (12)        Selector        Keep G3% G/K3% G5% G/K5% Q3 frac.
+
+                                                             TA-OPD           3.4 0.047         1.40 0.049      0.95    4.4
+    The complementary diagnostic term is DtI =               Raw KL           3.4 0.033         0.97 0.036      0.69    2.7
+De t (1− C
+         et ), which captures large but locally incom-       Incompat. D I    3.5 0.025         0.72     –         –    1.4
+patible disagreement. Thus, teachability captures            TIP              3.3 0.023         0.69 0.026      0.50    1.6
+                                                             Random           3.3 0.021         0.65 0.021      0.41    3.3
+locally learnable disagreement, whereas entropy              TA-OPD+Ent.      3.3 0.021         0.63 0.016      0.31    1.0
+captures uncertainty.                                        Entropy          3.3 0.018         0.53 0.009      0.18    0.3
+                                                             Q3+high-C        3.2 0.016         0.51 0.009      0.23   94.6
+                                                             Q3+low-C         3.2 0.010         0.32     –         –   94.7
+4.3     Token Selection and Baselines                        Q3-only          3.2 0.010         0.31 0.002      0.05   91.7
+Given retention ratio ρ, let n = ⌈ρ|I|⌉. TA-OPD
+keeps the top-n valid positions by teachability:
+     Tρteach = Topn {steach
+                                       
+                               : t ∈ I} ,                    5     Experiments
+                          t
+                                               (13)
+         mt = 1[t ∈ Tρteach ].
+                                                             5.1    Setup
+   To isolate teachability from uncertainty and raw
+disagreement, we compare against budget-matched              Models. We evaluate four teacher–student pairs:
+selectors:                                                   (1) Qwen3-4B to Qwen3-1.7B
+                                                             (2) Qwen3-8B-GRPO to Qwen3-4B
+         sH
+          t = Ht ,
+              e                     sD
+                                     t = Dt ,
+                                         e       (14)        (3) Qwen3-14B to Qwen3-4B
+      sTIP  =H     et − H
+              et + D    etD
+                          e t,      sC                       (4) DeepSeek-R1-Distill-Qwen-14B (Guo et al.,
+                                     t = Ct ,    (15)
+       t
+                                         e
+                                                             2025) to Qwen2.5-3B (Qwen: et al., 2025).
+where Ht = H(pθ (· | ct )). We also report an
+                                                             The Qwen3-8B teacher is GRPO-tuned (Shao et al.,
+optional entropy–teachability mixture,
+                                                             2024), so the settings vary scale, capability, and
+       sH+teach
+        t
+                 e t + steach
+                =H      t
+                               e t steach
+                              −H    t     ,      (16)        backbone architecture.
+                                                             Training data and benchmarks.            Training
+to test complementarity with the TIP entropy axis.
+                                                             prompts are sampled from DAPO (Yu et al.,
+Full OPD sets mt = 1 for all t ∈ I, and random
+                                                             2026). We evaluate math, coding, factual QA,
+selection samples n valid positions uniformly.
+                                                             and instruction following on AIME24 (Zhang and
+   In practice, Dt and Ct are computed from
+                                                             Math-AI, 2024), AIME25 (Zhang and Math-AI,
+teacher and student top-K log-probabilities. If
+                                                             2025), GPQA-Diamond (Rein et al., 2023), Hu-
+teacher scores on StS (K) are available, Eq. 10 is
+                                                             manEval (Chen et al., 2021), IFEval (Zhou et al.,
+exact; otherwise we use
+                    X                                        2023), and MATH-500 (Hendrycks et al., 2021),
+          C
+          bt =                 pT (v | ct ),   (17)          based on the EvalScope (Team, 2024). Each result
+                v∈StS (K)∩StT (K)                            reports the mean and standard deviation over five
+                                                             evaluation seeds from the same trained checkpoint.
+a lower bound on Ct . Unless stated otherwise, K =
+                                                             Baselines and budgets. We compare full OPD
+16. TA-OPD requires no reward model, verifier, or
+                                                             with budgeted token selectors: entropy-only (Jin
+additional labels.
+                                                             et al., 2026), TIP-style entropy+divergence (Xu
+Fixed-context selector check. Before down-                   et al., 2026), Teachability-Aware OPD (TA-OPD),
+stream evaluation, we verify that the diagnostic             and TA-OPD+Entropy. Unless otherwise stated,
+score can serve as a training mask. Table 2 com-             support statistics use K = 16, and budgets refer
+pares budgeted selectors on the same fixed-context           to KL-supervised response-token positions rather
+bank. TA-OPD gives the largest KL reduction and              than wall-clock savings.
+gain per kept token at both 3% and 5% budgets,               Implementation. All runs use the same sampled-
+supporting teachability as an OPD allocation rule            token OPD pipeline as the fixed-context analysis
+rather than only a post-hoc diagnostic.                      and are trained on 64 NVIDIA H800 GPUs.
+
+                                                         6
+Table 3: Main benchmark results at a 10% supervised-token budget. We evaluate Qwen3 teacher–student pairs
+and a cross-backbone DeepSeek-R1-Distill-Qwen-14B to Qwen2.5-3B pair. Entries report mean±std over five
+evaluation seeds; Avg. is the average score over six benchmarks. TA-OPD denotes Teachability-Aware OPD, and
+TA-OPD+Ent. adds entropy.
+
+ Setting            Method        Avg.      AIME24       AIME25      GPQA-D. HumanEval            IFEval   MATH-500
+
+                    Base          40.77   10.00±3.33   10.00±3.33   31.56±0.76   60.97±1.83   59.52±1.29   72.60±1.00
+                    Pure OPD      42.37   11.67±5.00   15.00±1.67   30.55±0.25   59.15±1.22   62.85±0.74   75.00±1.20
+ Qwen3-4B
+ →                  Entropy       41.46   13.34±3.34    8.33±5.00   32.58±1.77   59.45±0.30   60.63±0.01   74.40±1.00
+ Qwen3-1.7B         TIP           43.05   18.34±1.66   11.67±5.00   29.29±2.02   62.50±0.30   60.91±0.27   75.60±1.00
+                    TA-OPD        44.89   20.00±0.01   15.00±5.00   34.59±2.27   60.98±0.01   64.05±1.02   74.70±0.50
+                    TA-OPD+Ent.   42.32   15.00±1.67    8.34±1.67   32.58±1.77   61.59±0.61   61.73±0.92   74.70±0.10
+
+                    Base          52.98   21.66±1.66   13.33±0.01   47.97±0.51   77.75±0.30   73.57±2.22   83.60±0.20
+                    Pure OPD      53.71   20.00±3.33   21.67±1.67   47.22±1.26   78.36±0.92   70.33±1.20   84.70±1.30
+ Qwen3-8B
+                    Entropy       56.69   26.33±3.10   23.33±3.30   47.47±1.01   77.65±1.21   79.85±0.37   85.50±0.10
+ (GRPO)→
+                    TIP           56.81   26.33±3.60   23.67±3.33   47.47±0.49   80.49±0.61   76.71±1.11   86.20±0.30
+ Qwen3-4B
+                    TA-OPD        56.87   30.00±1.40   21.31±1.32   47.47±0.51   79.88±0.60   75.13±5.30   87.40±0.80
+                    TA-OPD+Ent.   56.52   30.00±3.33   25.00±1.67   45.70±2.78   78.05±1.22   73.38±2.22   87.00±0.40
+
+                    Base          52.98   21.66±1.66   13.33±0.01   47.97±0.51   77.75±0.30   73.57±2.22   83.60±0.20
+                    Pure OPD      54.64   23.34±3.34   21.66±1.66   42.17±0.76   78.05±0.61   79.11±0.74   83.50±0.10
+ Qwen3-14B
+ →                  Entropy       53.39   21.67±5.00   15.00±1.67   46.46±0.01   79.27±0.61   73.94±4.06   84.00±0.80
+ Qwen3-4B           TIP           53.62   20.00±0.01   16.66±3.33   47.98±2.53   78.05±0.61   76.62±1.57   82.40±0.01
+                    TA-OPD        54.65   23.34±3.34   18.34±1.66   45.20±1.77   79.57±0.92   78.93±0.01   82.50±1.70
+                    TA-OPD+Ent.   54.10   21.67±5.00   21.67±1.67   42.17±0.25   78.35±1.53   77.54±1.02   83.20±0.60
+
+                    Base          29.98    3.34±3.33    1.67±1.66   27.81±0.25   64.63±1.22   26.16±0.27   56.31±0.20
+ DeepSeek-R1        Pure OPD      28.76    5.00±1.67    1.67±1.66   27.78±1.51   62.20±1.21   23.48±0.18   52.50±0.90
+ Distill-Qwen-14B   Entropy       19.94    1.67±1.66    1.67±1.66   23.98±1.02   54.88±3.66   24.68±0.83   12.83±1.40
+ →                  TIP           28.11    3.33±0.01    1.67±1.66   27.55±0.01   58.54±0.60   26.16±0.28   51.40±0.50
+ Qwen2.5-3B         TA-OPD        30.62    5.00±1.66    1.67±1.66   29.59±0.51   66.77±0.31   25.42±1.20   55.31±0.60
+                    TA-OPD+Ent.   30.28    8.34±1.60    3.33±0.01   31.63±0.51   62.81±1.22   23.39±1.02   52.20±0.70
+
+
+
+5.2    Main Results                                              For stronger Qwen3 teachers with a 4B student,
+                                                              the results have similar trend. With the GRPO-
+Table 3 compares all methods at a 10% supervised-             tuned 8B teacher, TA-OPD has the best average
+token budget. Across the four teacher–student                 and leads on AIME24 and MATH-500, while TIP
+settings, TA-OPD obtains the best average score               or entropy remain competitive on HumanEval and
+in every group: 44.89 for Qwen3-4B to Qwen3-                  IFEval. With the 14B teacher, TA-OPD nearly
+1.7B, 56.87 for Qwen3-8B-GRPO to Qwen3-4B,                    matches Full OPD in average score and leads Hu-
+54.65 for Qwen3-14B to Qwen3-4B, and 30.62 for                manEval, while TA-OPD+Entropy is strongest on
+the cross-backbone DeepSeek-R1-Distill-Qwen to                AIME25. Thus, teachability is not a universal per-
+Qwen2.5 setting. This supports the main claim that            benchmark booster; it is a token-allocation rule that
+low-budget OPD can preserve useful supervision                improves the quality of supervised positions under
+when the retained tokens are teachable.                       a constrained OPD budget.
+   The gains are strongest when the student is
+smaller or the teacher–student pair is mismatched.            5.3   Budget Sensitivity
+For Qwen3-4B to Qwen3-1.7B, TA-OPD improves
+the average over Full OPD from 42.37 to 44.89 and             Table 4 sweeps 5%, 10%, 30%, and 50% budgets
+leads on AIME24, GPQA-Diamond, and IFEval.                    for the two Qwen3-4B student settings. The results
+For the cross-backbone setting, TA-OPD improves               are not monotonic in budget, indicating that more
+over both Base and Full OPD in average score,                 KL-supervised tokens do not always yield better
+while TA-OPD+Entropy gives the best AIME24,                   downstream performance.
+AIME25, and GPQA-Diamond scores. These re-                       For Qwen3-8B-GRPO to Qwen3-4B, low bud-
+sults suggest that teachability is especially useful          gets are already competitive: TA-OPD+Entropy
+when dense teacher supervision contains more in-              reaches the best 5% average score (57.89), while
+compatible or noisy token signals.                            TA-OPD gives the best MATH-500 score at 5%
+
+                                                          7
+Table 4: Budget sweep for the two Qwen3-4B student settings. Benchmark entries report mean±std; Avg. is the
+arithmetic mean of the six benchmark means, excluding the ± terms. TA-OPD denotes Teachability-Aware OPD;
+TA-OPD+Ent. adds the entropy axis.
+
+Setting     Budget Selector       Avg.    AIME24      AIME25      GPQA-D. HumanEval        IFEval MATH-500
+                   Entropy     56.95 31.66±1.66 26.66±0.01 47.47±0.15 76.83±1.22 73.47±0.64 85.60±0.20
+                   TIP         56.20 21.65±8.35 24.98±1.68 48.23±0.25 78.66±0.01 76.80±0.28 86.90±0.50
+             5%
+                   TA-OPD      57.35 31.66±1.67 26.67±0.01 46.47±0.51 78.97±0.92 72.46±0.37 87.90±1.10
+                   TA-OPD+Ent. 57.89 33.34±6.67 28.33±1.67 47.22±2.28 79.58±0.92 72.37±0.28 86.50±0.30
+                   Entropy     56.69 26.33±3.10 23.33±3.30 47.47±1.01 77.65±1.21 79.85±0.37 85.50±0.10
+                   TIP         56.81 26.33±3.60 23.67±3.33 47.47±0.49 80.49±0.61 76.71±1.11 86.20±0.30
+             10%
+Qwen3-8B           TA-OPD      56.87 30.00±1.40 21.31±1.32 47.47±0.51 79.88±0.60 75.13±5.30 87.40±0.80
+(GRPO)→            TA-OPD+Ent. 56.52 30.00±3.33 25.00±1.67 45.70±2.78 78.05±1.22 73.38±2.22 87.00±0.40
+Qwen3-4B           Entropy     57.56 28.33±5.00 25.00±5.00 48.49±1.52 79.58±0.31 77.45±3.33 86.50±0.10
+                   TIP         58.46 31.67±5.00 28.33±1.66 45.70±0.25 79.88±0.01 78.56±1.85 86.60±1.00
+             30%
+                   TA-OPD      57.28 28.34±1.67 28.33±1.67 49.19±0.30 77.75±0.31 74.96±3.24 85.10±0.50
+                   TA-OPD+Ent. 57.46 25.00±1.67 28.34±1.67 47.98±3.03 78.97±0.92 78.75±0.93 85.70±0.50
+                   Entropy     53.90 20.00±3.33 20.00±3.33 43.68±1.76 78.35±0.91 75.69±4.34 85.70±1.50
+                   TIP         55.74 23.33±3.33 24.99±1.66 44.69±0.75 78.96±0.91 76.15±2.40 86.33±0.33
+             50%
+                   TA-OPD      57.90 31.67±4.34 23.34±0.01 47.73±0.76 78.97±0.92 79.67±1.11 86.00±1.80
+                   TA-OPD+Ent. 57.25 23.33±0.01 30.00±3.33 46.97±1.01 78.05±0.61 78.93±0.19 86.20±0.40
+                   Entropy     53.56 23.34±3.34 16.67±0.01 43.94±2.02 77.75±0.92 75.97±5.36 83.70±0.30
+                   TIP         53.83 23.33±0.01 16.67±0.01 44.70±1.77 79.88±0.61 75.50±2.49 82.90±0.70
+             5%
+                   TA-OPD      53.58 18.34±1.66 18.34±1.66 45.70±1.27 77.75±0.30 79.66±0.93 81.70±1.30
+                   TA-OPD+Ent. 54.47 21.66±1.66 16.67±0.01 48.23±2.27 77.75±0.91 79.02±0.65 83.50±0.70
+                   Entropy     53.39 21.67±5.00 15.00±1.67 46.46±0.01 79.27±0.61 73.94±4.06 84.00±0.80
+                   TIP         53.62 20.00±0.01 16.66±3.33 47.98±2.53 78.05±0.61 76.62±1.57 82.40±0.01
+             10%
+Qwen3-14B          TA-OPD      54.65 23.34±3.34 18.34±1.66 45.20±1.77 79.57±0.92 78.93±0.01 82.50±1.70
+→                  TA-OPD+Ent. 54.10 21.67±5.00 21.67±1.67 42.17±0.25 78.35±1.53 77.54±1.02 83.20±0.60
+Qwen3-4B           Entropy     53.62 20.00±3.33 21.66±1.66 46.97±0.01 78.97±0.92 70.52±0.46 83.60±0.20
+                   TIP         53.93 26.67±0.01 21.66±5.00 43.18±1.26 79.57±0.30 69.97±0.09 82.50±0.50
+             30%
+                   TA-OPD      52.81 21.66±8.33 15.00±1.67 43.18±0.76 79.57±0.30 74.77±3.42 82.70±0.10
+                   TA-OPD+Ent. 53.15 20.00±3.33 18.34±1.66 45.70±2.77 79.88±0.01 72.45±1.30 82.50±0.10
+                   Entropy     52.76 18.34±1.66 18.33±1.67 44.95±0.51 78.66±0.01 73.38±2.59 82.90±0.50
+                   TIP         52.12 21.66±1.66 13.33±0.01 45.95±1.52 78.05±0.01 70.34±0.27 83.40±1.40
+             50%
+                   TA-OPD      52.16 13.33±0.01 18.34±1.66 45.20±0.25 77.75±0.31 73.75±3.51 84.60±0.20
+                   TA-OPD+Ent. 52.95 18.34±1.66 16.66±3.34 44.19±2.78 78.97±0.91 76.43±1.94 83.10±0.10
+
+
+and the best average among teachability-based se-         6   Conclusion
+lectors at 50% (57.90). TIP performs best at 30%
+                                                          We studied which token-level teacher signals are
+average, showing that uncertainty and divergence
+                                                          actually learnable in on-policy distillation. Using
+can still help on some benchmark mixtures. How-
+                                                          a fixed-context diagnostic, we showed that raw
+ever, the strong 5% results indicate that much of
+                                                          KL disagreement is a coarse proxy for learning
+the useful OPD signal is concentrated in a small
+                                                          value: it conflates learnable disagreement, where
+set of teachable positions.
+                                                          teacher mass has high coverage over the student’s
+   For Qwen3-14B to Qwen3-4B, the best average            top-K support, with incompatible disagreement,
+appears at 10% with TA-OPD (54.65), while TA-             where teacher mass falls mostly off support. We
+OPD+Entropy is strongest at 5% (54.47). Increas-          formalized this support-aware learning value as to-
+ing the budget to 30% or 50% does not consistently        ken teachability and used it to design Teachability-
+improve the average, and several metrics regress          Aware OPD, a lightweight token-position selec-
+relative to the 5–10% settings. This is consistent        tion method without reward model or verifier.
+with the fixed-context analysis: OPD is token qual-       Across Qwen3 and Qwen2.5 teacher–student set-
+ity limited rather than purely budget-limited, and        tings, TA-OPD often surpasses full-token OPD and
+the optimal ratio depends on the teacher, student,        improves over entropy- and divergence-based se-
+and benchmark mix. Appendix G provides fixed-             lectors. These results suggest that selective OPD
+context budget curves, macro-average budget sum-          should prioritize locally learnable teacher signals
+maries, and early downstream boundary checks.             rather than merely salient tokens, reframing OPD
+Remark 1: Appendix G reports the ablation study.          as a compatibility-aware supervision problem.
+
+                                                      8
+7   Limitations                                                  Jianmin Wu, and Hongxia Yang. 2026a. Featcal:
+                                                                 Feature calibration for post-merging models. arXiv
+Our analysis focuses on OPD for math-heavy rea-                  preprint arXiv:2605.13030.
+soning prompts and Qwen-family teacher–student
+                                                               Yanggan Gu, Yuanyi Wang, Zhaoyi Yan, Yiming Zhang,
+pairs, with one cross-backbone distillation setting.             Qi Zhou, Fei Wu, and Hongxia Yang. 2026b. Infifpo:
+Although the fixed-context diagnostic is model-                  Implicit model fusion via preference optimization in
+agnostic, broader coverage over multilingual data,               large language models. Advances in Neural Informa-
+dialogue tasks, code-specialized teachers, and non-              tion Processing Systems, 38:15645–15672.
+Qwen backbones would further test the general-                 Yuxian Gu, Hao Zhou, Fandong Meng, Jie Zhou, and
+ity of token teachability. TA-OPD also selects su-               Minlie Huang. 2026c. Miniplm: Knowledge distilla-
+pervised token positions rather than pruning trans-              tion for pre-training language models. In The Thir-
+                                                                 teenth International Conference on Learning Repre-
+former computation, so the reported token budget                 sentations.
+should be interpreted as a supervision budget, not
+a proportional wall-clock speedup. Finally, our di-            Daya Guo, Dejian Yang, Haowei Zhang, Junxiao
+                                                                 Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu
+agnostic measures same-context KL reduction; it                  Zhang, Shirong Ma, Xiao Bi, and 1 others. 2025.
+is designed to explain local learning signals and                Deepseek-r1: Incentivizing reasoning capability in
+should be paired with downstream evaluation when                 llms via reinforcement learning. arXiv preprint
+making deployment claims.                                        arXiv:2501.12948.
+                                                               Yiju Guo, Wenkai Yang, Zexu Sun, Ning Ding, Zhiyuan
+                                                                  Liu, and Yankai Lin. 2026. Learning to focus: Causal
+References                                                        attention distillation via gradient-guided token prun-
+                                                                  ing. Advances in Neural Information Processing
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Pi-
+                                                                  Systems, 38:24921–24948.
+  otr Stanczyk, Sabela Ramos Garea, Matthieu Geist,
+  and Olivier Bachem. 2024. On-policy distillation             Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul
+  of language models: Learning from self-generated               Arora, Steven Basart, Eric Tang, Dawn Song, and
+  mistakes. In International Conference on Learning              Jacob Steinhardt. 2021. Measuring mathematical
+  Representations, volume 2024, pages 21246–21263.               problem solving with the math dataset. In Thirty-
+                                                                 fifth Conference on Neural Information Processing
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan,
+                                                                 Systems Datasets and Benchmarks Track (Round 2).
+ Henrique Ponde de Oliveira Pinto, Jared Kaplan,
+ Harri Edwards, Yuri Burda, Nicholas Joseph, Greg              G Hinton. 2014. Distilling the knowledge in a neu-
+ Brockman, and 1 others. 2021. Evaluating large                  ral network. In Deep Learning and Representation
+ language models trained on code. arXiv preprint                 Learning Workshop in Conjunction with NIPS.
+ arXiv:2107.03374.
+                                                               Woogyeol Jin, Taywon Min, Yongjin Yang,
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,                 Swanand Ravindra Kadhe, Yi Zhou, Dennis
+  Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias                Wei, Nathalie Baracaldo, and Kimin Lee. 2026.
+  Plappert, Jerry Tworek, Jacob Hilton, Reiichiro               Entropy-aware on-policy distillation of language
+  Nakano, and 1 others. 2021. Training verifiers                models. In The 1st Workshop on Scaling Post-
+  to solve math word problems. arXiv preprint                   training for LLMs.
+  arXiv:2110.14168.
+                                                               Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang,
+Luyang Fang, Xiaowei Yu, Jiazhang Cai, Yongkai Chen,             Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang
+  Shushan Wu, Zhengliang Liu, Zhenyuan Yang, Hao-                Gao, Wenkai Yang, Zhiyuan Liu, and 1 others. 2026.
+  ran Lu, Xilin Gong, Yufang Liu, and 1 others. 2026.            Rethinking on-policy distillation of large language
+  Knowledge distillation and dataset distillation of             models: Phenomenology, mechanism, and recipe.
+  large language models: Emerging trends, challenges,            arXiv preprint arXiv:2604.13016.
+  and future directions. Artificial Intelligence Review,
+  59(1):17.                                                    Qwen:, An Yang, Baosong Yang, Beichen Zhang,
+                                                                Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan
+Leo Gao, Jonathan Tow, Baber Abbasi, Stella Bider-              Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan
+  man, Sid Black, Anthony DiPofi, Charles Foster,               Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin
+  Laurence Golding, Jeffrey Hsu, Alain Le Noac’h,               Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, and
+  Haonan Li, Kyle McDonell, Niklas Muennighoff,                 24 others. 2025. Qwen2.5 technical report. Preprint,
+  Chris Ociepa, Jason Phang, Laria Reynolds, Hailey             arXiv:2412.15115.
+  Schoelkopf, Aviya Skowron, Lintang Sutawika, and
+  5 others. 2024. The language model evaluation har-           David Rein, Betty Li Hou, Asa Cooper Stickland, Jack-
+  ness.                                                          son Petty, Richard Yuanzhe Pang, Julien Dirani, Ju-
+                                                                 lian Michael, and Samuel R Bowman. 2023. Gpqa:
+Yanggan Gu, Shuo Cai, Zihao Wang, Wenjun Wang,                   A graduate-level google-proof q&a benchmark. In
+  Yuanyi Wang, Pengkai Wang, Sirui Huang, Su Lu,                 First Conference on Language Modeling.
+
+
+                                                           9
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu,                Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang,
+  Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan                Saiyong Yang, and Yankai Lin. 2026. Learn-
+  Zhang, YK Li, and 1 others. 2024. Deepseekmath:               ing beyond teacher: Generalized on-policy distil-
+  Pushing the limits of mathematical reasoning in open          lation with reward extrapolation. arXiv preprint
+  language models. arXiv preprint arXiv:2402.03300.             arXiv:2602.12125.
+ModelScope Team. 2024. EvalScope: Evaluation frame-            Tianzhu Ye, Li Dong, Xun Wu, Shaohan Huang, and
+ work for large models.                                          Furu Wei. 2026. On-policy context distillation for
+                                                                 language models. arXiv preprint arXiv:2602.12275.
+Pengkai Wang, Pengwei Liu, Yuanyi Wang, Guanyu
+  Chen, Xingyu Ren, Xiaolong Li, Zhongkai Hao, Yut-            Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan,
+  ing Kong, Qixin Zhang, and Dong Ni. 2026a. Discov-             Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan,
+  ering physical directions in weight space: Composing           Gaohong Liu, Lingjun Liu, and 1 others. 2026. Dapo:
+  neural pde experts. arXiv preprint arXiv:2605.14546.           An open-source llm reinforcement learning system
+                                                                 at scale. Advances in Neural Information Processing
+Shenzhi Wang, Le Yu, Chang Gao, Chujie Zheng, Shix-              Systems, 38:113222–113244.
+  uan Liu, Rui Lu, Kai Dang, Xiong-Hui Chen, Jianxin
+  Yang, Zhenru Zhang, and 1 others. 2026b. Beyond              Songming Zhang, Xue Zhang, Tong Zhang, Bojie Hu,
+  the 80/20 rule: High-entropy minority tokens drive             Yufeng Chen, and Jinan Xu. 2025. Aligndistil:
+  effective reinforcement learning for llm reasoning.            Token-level language model alignment as adaptive
+  Advances in Neural Information Processing Systems,             policy distillation. In Proceedings of the 63rd An-
+  38:115452–115486.                                              nual Meeting of the Association for Computational
+                                                                 Linguistics (Volume 1: Long Papers), pages 19791–
+Wenjun Wang, Yanggan Gu, Shuo Cai, Yuanyi Wang,                  19807.
+ Pengkai Wang, Jianmin Wu, and Hongxia Yang.
+                                                               Xinsen Zhang, Zhenkai Ding, Tianjun Pan, Run Yang,
+ 2026c. E-pmq: Expert-guided post-merge quantiza-
+                                                                 Chun Kang, Xue Xiong, and Jingnan Gu. 2026.
+ tion with merged-weight anchoring. arXiv preprint
+                                                                 Opsdl: On-policy self-distillation for long-context
+ arXiv:2605.16882.
+                                                                 language models. arXiv preprint arXiv:2604.17535.
+Yuanyi Wang, Yanggan Gu, Zihao Wang, Kunxi Li,                 Yifan Zhang and Team Math-AI. 2024. American invi-
+  Yifan Yang, Zhaoyi Yan, Congkai Xie, Jianmin Wu,               tational mathematics examination (aime) 2024.
+  and Hongxia Yang. 2026d. Mergepipe: A budget-
+  aware parameter management system for scalable llm           Yifan Zhang and Team Math-AI. 2025. American invi-
+  merging. arXiv preprint arXiv:2602.13273.                      tational mathematics examination (aime) 2025.
+Yuanyi Wang, Yanggan Gu, Yiming Zhang, Qi Zhou,                Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang,
+  Zhaoyi Yan, Congkai Xie, Xinyao Wang, Jianbo                   Guan Pang, Feiyu Chen, and Aditya Grover.
+  Yuan, and Hongxia Yang. 2025. Model merging scal-              2026.      Self-distilled reasoner: On-policy self-
+  ing laws in large language models. arXiv preprint              distillation for large language models. arXiv preprint
+  arXiv:2509.24244.                                              arXiv:2601.18734.
+
+Yuanyi Wang, Zhaoyi Yan, Yiming Zhang, Qi Zhou,                Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Sid-
+  Yanggan Gu, Fei Wu, and Hongxia Yang. 2026e. In-                dhartha Brahma, Sujoy Basu, Yi Luan, Denny Zhou,
+  figfusion: Graph-on-logits distillation via efficient           and Le Hou. 2023. Instruction-following evalu-
+  gromov-wasserstein for model fusion. Advances in                ation for large language models. arXiv preprint
+  Neural Information Processing Systems, 38:119677–               arXiv:2311.07911.
+  119713.                                                      Qi Zhou, Yiming Zhang, Yanggan Gu, Yuanyi Wang,
+Yuanyi Wang, Yifan Yang, Su Lu, Yanggan Gu, Pengkai              Zhijie Sang, Zhaoyi Yan, Zhen Li, Shengyu Zhang,
+  Wang, Wenjun Wang, Zhaoyi Yan, Congkai Xie,                    Fei Wu, and Hongxia Yang. 2025. Democratizing ai
+  Jianmin Wu, Jialun Cao, and 1 others. 2026f. Ge-               through model fusion: A comprehensive review and
+  ometry conflict: Explaining and controlling forget-            future directions. Nexus.
+  ting in llm continual post-training. arXiv preprint          Qi Zhou, Yiming Zhang, Yanggan Gu, Yuanyi Wang,
+  arXiv:2605.09608.                                              Zhaoyi Yan, Zhen Li, Chi Yung Chung, and Hongxia
+                                                                 Yang. 2026. Model fusion for scalable and sustain-
+Xurong Xie, Zhucun Xue, Jiafu Wu, Jian Li, Yabiao
+                                                                 able artificial intelligence: A review and outlook.
+  Wang, Xiaobin Hu, Yong Liu, and Jiangning Zhang.
+                                                                 Journal of Modern Power Systems and Clean Energy,
+  2026. Llm-oriented token-adaptive knowledge dis-
+                                                                 14(1):37–49.
+  tillation. In Proceedings of the AAAI Conference
+  on Artificial Intelligence, volume 40, pages 34070–          A    Use of AI Assistants.
+  34078.
+                                                               We used large language model assistants for lan-
+Yuanda Xu, Hejian Sang, Zhengze Zhou, Ran He,
+  Zhipeng Wang, and Alborz Geramifard. 2026. Tip:
+                                                               guage polishing, grammar checking, and format-
+  Token importance in on-policy distillation. arXiv            ting refinement during paper preparation. All tech-
+  preprint arXiv:2604.14084.                                   nical ideas, method design, experiments, analyses,
+
+                                                          10
+claims, and final writing were developed, verified,           restricted distribution is
+and approved by the authors. The authors take full
+responsibility for the content of the submission.                                             p(v | ct )
+                                                                        p̄Ut (v | ct ) = P                   .
+                                                                                             u∈Ut p(u | ct )
+B   Ethical Considerations
+                                                              This keeps the diagnostic focused on locally salient
+TA-OPD is a training-time method for filtering                alternatives rather than full-vocabulary tail noise.
+teacher supervision. It can reduce exposure to noisy
+or incompatible teacher signals, but it does not              Normalization. All scalar token scores are nor-
+provide guarantees about factuality, safety, bias,            malized within a rollout batch:
+or harmful content in the distilled model. If the                        
+                                                                                  zt − Q0.05 (zB )
+                                                                                                               
+teacher produces unsafe behavior, selective distilla-          zet = clip                                , 0, 1 ,
+                                                                           Q0.95 (zB ) − Q0.05 (zB ) + ϵ
+tion may still transfer parts of that behavior when
+those tokens appear locally learnable to the student.         where Qq is the q-quantile. We use the same
+Practical use should therefore combine TA-OPD                 normalization for entropy, disagreement, and
+with standard data filtering, safety evaluation, and          compatibility-derived scores.
+task-specific deployment checks. Our experiments
+use public benchmark-style data and do not rely on            SupportP  proxies. The main compatibility mass
+private user data.                                            is Ct = v∈S S (K) pT (v | ct ). We also audit sim-
+                                                                             t
+                                                              pler proxies: top-K overlap fraction, top-K Jac-
+C    Fixed-Context Diagnostic Protocol                        card, shared teacher top-K mass, and a contrastive
+                                                              binary compatibility score (CBC). These proxies
+Context bank. For each prompt, we sample stu-                 ask the same question: how much of the teacher
+dent rollouts and store valid response prefixes               correction remains near the student’s local support?
+ci,t = (xi , yi,<t ). All checkpoints are scored on
+this same bank, so diagnostic differences cannot              E    Low-Entropy with High-Divergence
+come from resampling different rollouts.                           Heterogeneity Diagnostics
+Support metrics. For support size K, StS (K)                  Live quadrant intervention. We train three
+and StT (K) denote the student and teacher top-K              masks restricted to the low-entropy with high-
+token sets. We compute disagreement on StS (K) ∪              divergence (Q3) region: high DL , low DL , and
+                              (K)
+StT (K), and compatibility Ct as teacher mass                 high DI . All keep roughly the same token ratio.
+on StS (K). Scalars are robustly normalized within            The high-DL mask is the only clearly positive in-
+a batch by clipping the 5–95 percentile range to              tervention; low-DL is negative, and high-DI is
+[0, 1].                                                       weak.
+
+Fixed-context gain. When full-vocabulary prob-                Exact-budget fixed-context controls. Fig 4 sum-
+abilities are available, we compute Eq. 1. Other-             marizes the main Q3 control evidence. Here we
+wise, top-K support diagnostics are used only for             report the full exact top-N table behind Panels A–
+robustness checks. Because token gains are heavy-             B. Every selector keeps the same number of tar-
+tailed and correlated within a rollout, all confidence        get tokens; support-aligned selectors remain posi-
+intervals use prompt-cluster bootstrap.                       tive, while random selection is consistently nega-
+                                                              tive. Appendix Fig 5C shows the bucket-level gain
+Gradient view. Proposition 1 gives the local op-              shapes used as a nonlinear sanity check.
+timization view used in Section 3.1. The proof is
+included in Appendix I.                                       Support-definition audit. The quadrant result
+                                                              is stable across support proxies. Teacher mass on
+D    Local-Support Decomposition                              student support, top-K overlap, Jaccard overlap,
+                                                              and CBC all produce positive high–low support
+Top-K supports. For each fixed context ct , we                gaps inside the low-entropy with high-divergence
+store the student and teacher top-K sets StS (K)              region. Appendix Fig 5A gives a compact heatmap
+and StT (K). The union Ut = StS (K) ∪ StT (K)                 of the robustness gaps in Table 1. Appendix Fig 5B
+is used for local disagreement. For v ∈ Ut , the              visualizes the support-proxy audit.
+
+                                                         11
+      Table 5: Section 3 diagnostic datasets. The short diagnostic run is retained only as a boundary check.
+
+                           Dataset                      Contexts   Tokens   Use
+                           4B → 1.7B held-out 300           300    57,600   main
+                           4B → 1.7B GSM8K-COT 300          300    57,600   main
+                           8B → 1.7B 300                    300    57,600   main
+                           14B → 1.7B 300 K=8               300    57,600   main
+                           14B → 1.7B 300                   300    57,600   main
+                           14B → 1.7B 300 K=32              300    57,600   main
+                           8B → 1.7B short diagnostic          8    1,024   boundary only
+
+Table 6: Support proxy audit inside the low-entropy with high-divergence (Q3) region. Different support definitions
+produce positive high–low gain gaps.
+
+                     Setting                Proxy       Tokens       Gap         95% interval
+                     14B → 1.7B, K=16       Ct mass       3342     +0.086    [+0.064, +0.104]
+                     14B → 1.7B, K=16       CBC           3342     +0.105    [+0.078, +0.125]
+                     14B → 1.7B, K=16       Jaccard       3342     +0.038    [+0.020, +0.055]
+                     14B → 1.7B, K=16       overlap       3342     +0.038    [+0.020, +0.055]
+                     14B → 1.7B, K=32       Ct mass       3342     +0.090    [+0.074, +0.106]
+                     14B → 1.7B, K=32       CBC           3342     +0.105    [+0.078, +0.125]
+                     14B → 1.7B, K=32       Jaccard       3342     +0.052    [+0.032, +0.069]
+                     14B → 1.7B, K=32       overlap       3342     +0.052    [+0.032, +0.069]
+
+
+F   Regression Diagnostics for Learnable                     entropy with high-divergence compatibility con-
+    Disagreement                                             trols. The fixed-context gain peaks around 3–5%
+                                                             and saturates at 10%, suggesting that selected
+Specification. For each token, the dependent vari-
+                                                             supervision is quality-limited rather than simply
+able is the fixed-context gain Gfix
+                                  i,t in Eq. 1. All          budget-limited.
+scalar predictors are standardized within the di-
+agnostic dataset. The baseline includes student              Macro-average budget view. Table 11 com-
+entropy, local disagreement, their interaction, nor-         presses the Qwen3-4B student budget sweep from
+malized token position, and teacher entropy. We              Table 4 into benchmark macro-averages. The trend
+then compare two extensions: adding compatibil-              is not monotonic: TA-OPD or TA-OPD+Ent. is
+ity Ct alone, or replacing raw disagreement with             strongest at several low-budget points, while larger
+the decomposed pair DtL , DtI . Confidence intervals         budgets can help or hurt depending on the teacher
+use prompt-cluster bootstrap.                                and benchmark mix.
+Why coefficients, not only R2 . Token gains are              Downstream selector ablation. Table 12 com-
+heavy-tailed and noisy because a single local up-            pares alternative token selectors in the Qwen3-
+date can affect later prefixes and formatting to-            8B-GRPO to Qwen3-4B setting at the same 10%
+kens. We therefore use standardized coefficients             supervised-token budget. TA-OPD obtains the best
+and prompt-cluster gaps as the main diagnostic; R2           average score (54.65), ahead of raw KL (53.76), C-
+is reported only as an incremental sanity check.             only selection (54.19), Q3-only selection (52.46),
+Nonlinear sanity check. We also bin resid-                   and Q3+high-C selection (53.32). This supports
+ualized gains by DL , DI , and Ct using                      the main interpretation: useful OPD targets require
+the same fixed-context bank.    The binned                   both a meaningful teacher correction and local sup-
+curves do not indicate that the separation                   port alignment.
+in Fig 3A is an artifact of a purely linear                  Early downstream smoke checks. Before the
+model. The source artifacts are archived as                  full benchmark suite in Section 5.2, we ran
+standardized_regression_coefficients.csv                     small downstream smoke checks on GSM8K-COT,
+and spline_sanity_bins.csv under figs/.                      MATH-hard, and capped AIME. GSM8K-COT fol-
+                                                             lowed the fixed-context trend, while MATH-hard
+G    Budget and Downstream Boundary
+                                                             and capped AIME were low-resolution boundary
+     Checks
+                                                             checks; we therefore report the complete down-
+Budget sweep. We sweep the effective KL-                     stream evidence only in the main benchmark tables
+supervised token budget for TA-OPD and low-                  and omit the sparse smoke table.
+
+                                                        12
+Table 7: Low-entropy with high-divergence live intervention. Even inside this TIP region, high teachability is
+beneficial while low teachability is harmful.
+
+               Q3-region mask        Keep %         Boot. gain        Match. gain      DL           DI       C
+                       L
+               Q3+D high                3.26    0.015 ± 0.010                0.010   0.072     0.005     0.972
+               Q3+DL low                3.24   -0.010 ± 0.015               -0.006   0.015     0.011     0.933
+               Q3+DI high               3.23    0.006 ± 0.003               -0.003   0.053     0.012     0.919
+
+Table 8: Exact top-N matched fixed-context analysis at K = 16. Useful as a confound check: all selectors retain
+exactly the same number of tokens.
+
+            Selector       Ratio    Gain       95% interval         Gain/keep   Q3 frac.      H          D       C
+            DL                3     0.130     [0.123, 0.138]             4.34        7.4     0.31    1.00    0.99
+            DL                5     0.135     [0.128, 0.143]             2.70        5.5     0.37    0.94    0.97
+            KL                3     0.120     [0.112, 0.129]             4.00        6.1     0.40    1.00    0.66
+            KL                5     0.119     [0.113, 0.126]             2.38        5.4     0.41    1.00    0.65
+            TIP-soft          3     0.093     [0.075, 0.110]             3.11        2.6     0.70    0.69    0.59
+            TIP-soft          5     0.094     [0.080, 0.107]             1.88        2.6     0.69    0.69    0.61
+            Entropy           3     0.076     [0.055, 0.095]             2.53        0.0     1.00    0.42    0.54
+            Entropy           5     0.066     [0.050, 0.082]             1.32        0.0     1.00    0.42    0.56
+            Random            3    -0.130   [-0.200, -0.072]            -4.35        4.8     0.18    0.13    0.93
+            Random            5    -0.105   [-0.149, -0.057]            -2.09        4.8     0.19    0.13    0.93
+            DI                3     0.105     [0.096, 0.113]             3.50        1.8     0.64    0.87    0.03
+            DI                5     0.111     [0.104, 0.117]             2.22        1.6     0.66    0.72    0.11
+
+
+
+H    Impact to Model Fusion                                         with
+                                                                                          β
+Model fusion aims to aggregate capabilities from                                            ∥∆t ∥22 .
+                                                                                       |rt | ≤
+                                                                                          2
+multiple LLMs under limited compute, either by                      Substituting ∆t = −ηgt gives
+parameter-space merging or by distillation-based
+fusion. Recent merging studies characterize scaling                    Lfix (θt+ ) = Lfix (θ) − η ⟨∇θ Lfix (θ), gt ⟩ + rt .
+behavior and budget-aware parameter management
+(Wang et al., 2025, 2026d), while related work                      Rearranging,
+studies post-merge calibration, quantization, and
+geometry conflict in weight space (Wang et al.,                                 Gt = η ⟨∇θ Lfix (θ), gt ⟩ − rt .
+2026f; Gu et al., 2026a; Wang et al., 2026c,a). An-
+                                                                    Setting Rt = −rt yields the result.
+other line performs implicit or logit-level fusion
+through preference optimization and distillation,
+treating model outputs as transferable supervision
+signals (Gu et al., 2026b; Wang et al., 2026e). Our
+work is complementary to both views. Rather
+than asking how to combine models globally, TA-
+OPD studies which token-level teacher signals are
+locally absorbable by the current student policy.
+This suggests a compatibility-aware perspective on
+distillation-based fusion: effective fusion should
+not only aggregate stronger sources, but also iden-
+tify the subset of teacher signals that the target
+model can learn from.
+
+I   Proof of Proposition 1
+Let gt = ∇θ ℓt (θ) and ∆t = −ηgt .                 By β-
+smoothness of Lfix ,
+Lfix (θ + ∆t ) = Lfix (θ) + ⟨∇θ Lfix (θ), ∆t ⟩ + rt ,
+
+                                                               13
+                      A. compact robustness heatmap                                           B. support proxy audit                                         C. bucket-level shape
+                                                                                                                                                       0.7
+   4B→1.7B held-out        +0.078          +0.016          0.036               K=32 / CBC
+                                                                                                                                                       0.6
+
+ 4B→1.7B GSM8K-COT         +0.087          +0.037          0.042              K=32 / mass
+                                                                                                                                                       0.5
+
+
+
+
+                                                                                                                                  trimmed token gain
+      8B→1.7B math         +0.118          +0.042          0.050            K=32 / overlap                                                             0.4
+
+
+                                                                                                                                                       0.3
+     14B→1.7B K=8          +0.098          +0.071          0.037               K=16 / CBC
+
+                                                                                                                                                                                 C math
+                                                                                                                                                       0.2
+                                                                                                                                                                                 D I math
+    14B→1.7B K=16          +0.084          +0.058          0.029              K=16 / mass
+                                                                                                                                                                                 D L math
+                                                                                                                                                       0.1                       C GSM8K
+                                                                                                                                                                                 D I GSM8K
+    14B→1.7B K=32          +0.078          +0.046          0.033            K=16 / overlap
+                                                                                                                                                       0.0                       D L GSM8K
+
+
+                            ap              ap              ht                               0.00       0.05           0.10                                  0       1       2              3
+                      ot
+                           g               g             tig
+                 bo                  tch            CI
+                                 ma                                                                  within-Q3 gain gap                                              Q3 bucket
+
+
+
+Figure 5: Additional low-entropy with high-divergence and robustness evidence. The panels visualize the support-
+proxy audit, compact robustness statistics, and bucket-level gain shapes used by Sections 3.4–3.3.
+
+
+Table 9: Prompt-cluster bootstrap regression decomposition. Learnable disagreement has a consistently larger
+                                                             2
+standardized coefficient than incompatible disagreement. ∆Rdecomp   is reported in 10−3 units relative to the
+entropy+divergence baseline.
+
+                                                                                                                                  2
+                                    K          Q3 tokens              βL           βI           Gap        95% interval         ∆Rdecomp
+                                     8               2393           0.086      0.045          0.041       [0.039, 0.044]                               0.897
+                                    16               2393           0.087      0.043          0.044       [0.041, 0.047]                               0.790
+                                    32               2393           0.087      0.043          0.044       [0.041, 0.047]                               0.743
+
+
+
+Table 10: Fixed-context budget sweep for TA-OPD. The teachability selector peaks around 3–5% effective target-
+token budget and saturates at 10%.
+
+                                    Selector                   Nominal %    Actual %           Bootstrap gain          Matching gain                    Seeds
+                                    TA-OPD                             1          1.89          0.034 ± 0.016          0.017 ± 0.015                          3
+                                    TA-OPD                             3          3.35          0.047 ± 0.006          0.030 ± 0.003                          3
+                                    TA-OPD                             5          5.14          0.049 ± 0.002          0.027 ± 0.003                          3
+                                    TA-OPD                            10         10.16          0.035 ± 0.013          0.022 ± 0.007                          3
+                                    Q3+high-C                          1          1.93          0.009 ± 0.004          0.002 ± 0.002                          2
+                                    Q3+high-C                          3          3.20          0.016 ± 0.001          0.007 ± 0.006                          3
+                                    Q3+high-C                          5          3.93          0.009 ± 0.015          0.002 ± 0.009                          3
+                                    Q3+low-C                           3          3.23          0.010 ± 0.003          0.006 ± 0.006                          3
+                                    DI                                 3          3.52          0.025 ± 0.000          0.014 ± 0.005                          3
+
+
+
+Table 11: Macro-average budget sweep on the two Qwen3-4B student settings. Scores average the six downstream
+benchmark means in Table 4; the full per-benchmark results are kept in the main table. TA-OPD denotes Teachability-
+Aware OPD, and TA-OPD+Ent. adds the entropy axis.
+
+                                               Setting               Budget Entropy                 TIP TA-OPD TA-OPD+Ent.
+                                                         5%                        56.95        56.20          57.35             57.89
+                                               Qwen3-8B  10%                       56.69        56.81          56.87             56.52
+                                               (GRPO)→4B 30%                       57.56        58.46          57.28             57.46
+                                                         50%                       53.90        55.74          57.90             57.25
+                                                                     5%            53.56        53.83          53.58             54.47
+                                               Qwen3-14B             10%           53.39        53.62          54.65             54.10
+                                               →4B                   30%           53.62        53.93          52.81             53.15
+                                                                     50%           52.76        52.12          52.16             52.95
+
+
+
+
+                                                                                             14
+Table 12: Downstream selector ablation for Qwen3-8B-GRPO → Qwen3-4B at a 10% supervised-token budget.
+Entries report mean±std over five evaluation seeds; Avg. averages the six benchmark means. TA-OPD is not
+reducible to raw KL, compatibility mass C, or the low-entropy with high-divergence Q3 region.
+
+ Selector           Avg.       AIME24        AIME25          GPQA-D. HumanEval             IFEval   MATH-500
+
+ Raw KL            53.76   21.66±1.66     20.00±0.01    44.95±1.52     78.97±0.30     73.38±2.22    83.60±0.40
+ C-only            54.19   21.66±1.66     18.33±8.33    43.94±3.03     77.75±0.91     80.13±0.83    83.30±0.30
+ Q3-only           52.46   21.66±1.66     15.00±1.67    44.70±1.27     79.57±0.91     70.52±0.28    83.30±0.10
+ Q3+high-C         53.32   21.67±5.00     16.66±3.33    44.69±3.29     78.97±0.30     75.05±5.36    82.90±1.10
+ Entropy           53.39   21.67±5.00     15.00±1.67    46.46±0.01     79.27±0.61     73.94±4.06    84.00±0.80
+ TIP               53.62   20.00±0.01     16.66±3.33    47.98±2.53     78.05±0.61     76.62±1.57    82.40±0.01
+ TA-OPD+Ent.       54.10   21.67±5.00     21.67±1.67    42.17±0.25     78.35±1.53     77.54±1.02    83.20±0.60
+ TA-OPD            54.65   23.34±3.34     18.34±1.66    45.20±1.77     79.57±0.92     78.93±0.01    82.50±1.70
+
+
+
+
+Table 13: MATH-hard category deltas relative to the base model. Values are percentage-point changes. This table is
+best treated as boundary analysis rather than the central claim.
+
+                  Model           Alg.   C&P     Geo.    IntAlg.    Num.    PreAlg.   PreCalc.
+                    L
+                  D               +1.6     0.0   +3.0        -1.4    -3.9     -0.5        +1.5
+                  TIP             +2.9    +0.8   +2.3        +3.2    -7.1     +3.1        +0.7
+                  DI              +1.0    +4.9   +0.8        +1.8    -3.9     +2.6         0.0
+                  Random          +2.0    -0.8   -0.8        +0.4    -3.9     +2.1         0.0
+                  Entropy+DL       0.0    +0.8   +3.8        +1.4    -5.2      0.0        +0.7
+                  Entropy          0.0     0.0   +2.3        -2.1    -2.0     +0.5        -0.7
+
+
+
+
+                                                        15
+

@@ -1,0 +1,30 @@
+# ---- Python / 构建产物 ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- slime / Ray / 训练运行时（体积巨大，禁止提交） ----
+.ray/
+ray_tmp/
+/tmp/slime_ray_*/
+wandb/
+tensorboard/
+**/latest_checkpointed_iteration.txt
+**/token_bank/
+**/student_hf/
+**/*_torch_dist/
+**/outputs/
+**/save/
+**/logs/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# 注：按 经验规则/AI使用规则.md，运行 log 用 Git LFS 保存。
+# 本仓库已 `git lfs track "*.pdf" "*.log" "*.parquet"`，
+# 产生 run log 后请用 `git lfs track` 纳入再 commit，不要忽略。

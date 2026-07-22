@@ -47,6 +47,7 @@ if [ -f "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt" ]; then
   echo "[skip] torch_dist 已存�?: ${STUDENT_TORCH_DIST}"
 else
   cd "${SLIME_DIR}"
+  SLIME_DIR=${SLIME_DIR} \
   HF_MODEL=${STUDENT_HF} \
   SAVE_DIR=${STUDENT_TORCH_DIST} \
   NPROC_PER_NODE=1 \

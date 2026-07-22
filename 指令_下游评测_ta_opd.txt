@@ -10,18 +10,19 @@
 # ============================================================
 set -euo pipefail
 
-# ---------- 【填写区】路径（与前面指令一致） ----------
-CODE_ROOT=/path/to/code
+# ---------- 【填写区】路径（已按 8x4090 机器填写） ----------
+CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline
 TAOPD_DIR=${CODE_ROOT}/TA-OPD
 SLIME_DIR=${TAOPD_DIR}/slime_ta_opd
-OUTPUT_ROOT=/path/to/outputs/slime_opd
-STUDENT_HF=/path/to/models/Qwen3-1.7B/Qwen_Qwen3-1.7B     # 原始 HF（Base + 转换用 origin）
+OUTPUT_ROOT=${CODE_ROOT}/outputs/slime_opd
+MODELS=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/modelweights
+STUDENT_HF=${MODELS}/Qwen3-1.7B-Base                     # 原始 HF（Base + 转换用 origin）
 EVAL_ROOT=${OUTPUT_ROOT}/downstream_eval
 # 评测用的独立 conda 环境（含 lm-eval；仓库脚本里叫 lmeval）
 CONDA_ENV=lmeval
 # HF 缓存（评测要下数据集）
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-export HF_HOME="${HF_HOME:-/path/to/hf_cache}"
+export HF_HOME="${HF_HOME:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/data/hf_cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
 # 5 个 eval seed（论文口径）；若 greedy 评测各 seed 相同属正常，见末尾说明

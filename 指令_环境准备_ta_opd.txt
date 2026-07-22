@@ -8,12 +8,12 @@
 # ============================================================
 set -euo pipefail
 
-# ---------- 【填写区】路径（按你机器改） ----------
-CODE_ROOT=/path/to/code                       # 放仓库与 Megatron 的根目录
+# ---------- 【填写区】路径（已按 8x4090 机器填写） ----------
+CODE_ROOT=/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline
 TAOPD_DIR=${CODE_ROOT}/TA-OPD                 # 已克隆的 TA-OPD 仓库
 SLIME_DIR=${TAOPD_DIR}/slime_ta_opd           # 完整 slime 树（含 train.py / setup.py / docker/patch）
 MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM      # 本脚本会在此 clone + 打 patch
-OUTPUT_ROOT=/path/to/outputs/slime_opd
+OUTPUT_ROOT=${CODE_ROOT}/outputs/slime_opd    # 训练产物放代码目录内（已被 .gitignore 排除）
 # -------------------------------------------------
 
 # CUDA / torch 基准（必须一致；4090 用 CUDA 12.4 + torch 2.5.x 较稳）

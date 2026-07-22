@@ -39,8 +39,9 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 # 安全网：conda 的 activate.d/deactivate.d 钩子会引用若干未定义变量，先置空避免（即便未开 nounset 也稳住）
 export _CONDA_PYTHON_SYSCONFIGDATA_NAME_USED="${_CONDA_PYTHON_SYSCONFIGDATA_NAME_USED:-}"
 conda create -y -n "${CONDA_ENV}" python=${PYTHON_VER}
+conda activate "${CONDA_ENV}"   # 先激活：后续 nvcc/pip/torch 全部装进 ta_opd 环境（已全局关闭 nounset，conda 钩子不再报错）
 
-# --- CUDA 工具链：优先用机器自带系统 CUDA，跳过 conda 的 nvidia 频道（已弃用、慢、且触发报错钩子） ---
+# --- CUDA 工具链：优先用机器自带系统 CUDA，否则 pip 装进当前(ta_opd)环境（跳过 conda 的 nvidia 频道） ---
 NVCC_BIN=""
 for cand in "${CUDA_HOME:-}/bin/nvcc" /usr/local/cuda/bin/nvcc "$(command -v nvcc 2>/dev/null)"; do
   [ -x "$cand" ] && NVCC_BIN="$cand" && break
@@ -49,7 +50,7 @@ if [ -n "$NVCC_BIN" ]; then
   export CUDA_HOME="$(cd "$(dirname "$(dirname "$NVCC_BIN")")" && pwd)"
   NV_VER="$(nvcc --version | grep -o 'release [0-9.]*' | head -1)"
   echo "[OK] 使用系统 CUDA: ${CUDA_HOME} (${NV_VER})"
-  echo "[INFO] 已跳过 conda 安装 cuda-toolkit"
+  echo "[INFO] 已跳过 pip 安装 cuda-nvcc"
   if echo "$NV_VER" | grep -q 'release 1[0-1]\.'; then
     echo "[WARN] 系统 CUDA 版本 <12，可能和 torch cu124 不匹配；如编译 flash-attn/apex 报错请改用 CUDA 12.x"
   fi
@@ -68,8 +69,6 @@ else
 fi
 export PATH="${CUDA_HOME}/bin:${PATH}"
 echo "CUDA_HOME=${CUDA_HOME}  nvcc=$(command -v nvcc)"
-
-conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 钩子不再报错
 
 # ===================== PHASE 1: torch + sglang（基准） =====================
 echo "===== PHASE 1: torch ${TORCH_VER}+cu${CUDA_SHORT} + sglang 0.5.10.post1 ====="

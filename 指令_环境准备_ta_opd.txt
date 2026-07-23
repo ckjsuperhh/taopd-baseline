@@ -137,7 +137,39 @@ python -c "import torch; print('[CHECK] torch', torch.__version__, 'cuda', torch
 pip install --force-reinstall --no-build-isolation "flash-attn==2.7.4.post1"
 python -c "import flash_attn; print('[OK] flash_attn', flash_attn.__version__)"
 # 3) 鍐嶈 sglang锛坒lash-attn 宸查拤姝伙紝涓嶄細瑙﹀彂 torch 鍗囩骇锛?
-pip install "sglang==0.5.10.post1"
+# 3) 安装 sglang：Dockerfile 基于 slimerl/sglang:v0.5.10.post1（torch 2.5 的 fork）；
+# 但 PyPI 的 sglang==0.5.10.post1 已被重新发布为要求 torch==2.9.1，与 cu124 不兼容。
+# 改用上游 sgl-project/sglang @ v0.5.10.post1（与 TA-OPD sglang.patch 基线一致），
+# 打上 patch 并放宽其 torch/torchao/torchaudio/torchcodec/flash-attn-4/transformers/cuda-python
+# 的硬版本锁，使 torch 保持 2.5.1+cu124（其余依赖由全局 PIP_CONSTRAINT 解析到 torch2.5 兼容版）。
+if python -c "import importlib.metadata as m; v=m.version('sglang'); import sys; sys.exit(0 if v.startswith('0.5.10') else 1)" 2>/dev/null; then
+  echo "[OK] sglang 0.5.10 已安装，跳过"
+else
+  SGLANG_SRC=${OUTPUT_ROOT}/sglang_src
+  if [ ! -d "${SGLANG_SRC}" ]; then
+    git clone --depth 1 --branch v0.5.10.post1 https://github.com/sgl-project/sglang.git "${SGLANG_SRC}"
+  fi
+  cd "${SGLANG_SRC}"
+  if git apply --check -R "${SLIME_DIR}/docker/patch/latest/sglang.patch" >/dev/null 2>&1; then
+    echo "[OK] sglang.patch 已应用，跳过"
+  else
+    git apply "${SLIME_DIR}/docker/patch/latest/sglang.patch" || { echo "[ERROR] sglang.patch 应用失败"; exit 1; }
+    echo "[OK] applied sglang.patch"
+  fi
+  # 放宽与 torch 2.5.1+cu124 冲突的硬版本锁（否则 pip 因 torch==2.9.1 等无法满足而失败）
+  sed -i -E \
+    -e '/"torch==2\.9\.1",/d' \
+    -e '/"torchao==0\.9\.0",/d' \
+    -e '/"torchaudio==2\.9\.1",/d' \
+    -e '/"torchcodec==0\.9\.1/d' \
+    -e 's/"flash-attn-4>=4\.0\.0b4",/"flash-attn",/' \
+    -e 's/"transformers==5\.3\.0",/"transformers",/' \
+    -e 's/"cuda-python==12\.9",/"cuda-python",/' \
+    python/pyproject.toml
+  cd "${SGLANG_SRC}/python"
+  SETUPTOOLS_SCM_PRETEND_VERSION=0.5.10.post1 pip install .
+  cd "${SLIME_DIR}"
+fi
 python -c "import torch; assert torch.__version__.startswith('${TORCH_VER}'), f'[ABORT] torch 琚媺楂樺埌 {torch.__version__}'; print('[OK] torch 鐗堟湰绋冲畾', torch.__version__)"
 python -c "import torch, sglang; print('torch', torch.__version__, 'cuda', torch.version.cuda, '| sglang', sglang.__version__)"
 echo "[CHECK] 鑻? sglang import 鎶? sgl-kernel wheel 缂哄け锛氭妸 CUDA_SHORT/TORCH_VER 鏀? cu121/torch2.4.0 閲嶈 PHASE1"

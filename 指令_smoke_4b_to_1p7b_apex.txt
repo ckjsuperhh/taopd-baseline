@@ -32,9 +32,10 @@ PROMPT_DATA=${DATA_DIR}/dapo_train.parquet        # DAPO prompts 整理成 parqu
 OUTPUT_ROOT=/tmp/kejiechen/outputs/slime_opd
 # -------------------------------------------------
 
-# 6 卡分配：teacher 占 5；actor 用 0,1（2 卡）；rollout 用 2（1 卡）；3,4 备用
+# 6 卡分配（避开被他人 vLLM 占用的 GPU0）：teacher 占 5；Ray 管 1,2,3,4
+#   actor 用 1,2（2 卡）；rollout 用 3（1 卡）；4 备用
 export TEACHER_GPU=5
-export RAY_GPUS=0,1,2,3,4
+export RAY_GPUS=1,2,3,4
 export ACTOR_NUM_GPUS_PER_NODE=2
 export ROLLOUT_NUM_GPUS=1
 export COLOCATE=0

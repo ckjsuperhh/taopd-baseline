@@ -78,9 +78,12 @@ PY
 
 # ===================== PHASE 2: student HF -> torch_dist =====================
 echo "===== PHASE 2: 转换 student -> torch_dist ====="
+# apex-llm 的 GPU0 被他人 vLLM 长期占用（~48G），转换改用空闲 GPU（这里用 1）
+export CUDA_VISIBLE_DEVICES=1
 if [ -f "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt" ]; then
   echo "[skip] torch_dist 已存在: ${STUDENT_TORCH_DIST}"
 else
+  rm -rf "${STUDENT_TORCH_DIST}"   # 清除上一次失败残留，避免 convert 脚本因 SAVE_DIR 已存在而中断
   cd "${SLIME_DIR}"
   SLIME_DIR=${SLIME_DIR} \
   HF_MODEL=${STUDENT_HF} \

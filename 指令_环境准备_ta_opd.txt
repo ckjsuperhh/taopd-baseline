@@ -188,7 +188,7 @@ else
   SETUPTOOLS_SCM_PRETEND_VERSION=0.5.10.post1 pip install .
   cd "${SLIME_DIR}"
 fi
-python -c "import torch; assert torch.__version__.startswith('${TORCH_VER}'), f'[ABORT] torch 琚媺楂樺埌 {torch.__version__}'; print('[OK] torch 鐗堟湰绋冲畾', torch.__version__)"
+python -c "import torch; assert torch.__version__.startswith('${TORCH_VER}'), f'[ABORT] torch version mismatch: {torch.__version__}, expected ${TORCH_VER}'; print('[OK] torch', torch.__version__)"
 python -c "import torch, sglang; print('torch', torch.__version__, 'cuda', torch.version.cuda, '| sglang', sglang.__version__)"
 echo "[CHECK] 鑻? sglang import 鎶? sgl-kernel wheel 缂哄け锛氭妸 CUDA_SHORT/TORCH_VER 鏀? cu121/torch2.4.0 閲嶈 PHASE1"
 
@@ -266,7 +266,7 @@ pip install "numpy<2"
 
 # 安全网：PHASE 5/6 的 requirements 若把 torch 拽高，会在导入时报晦涩的 ABI 错误；
 # 这里提前断言，若不达标立即失败，避免浪费后续时间。
-python -c "import torch; assert torch.__version__.startswith('${TORCH_VER}'), f'[ABORT] 后续依赖把 torch 拽高到 {torch.__version__}，请固定 requirements 中的 torch/flash-attn'; print('[OK] torch 仍是', torch.__version__)"
+python -c "import torch; assert torch.__version__.startswith('${TORCH_VER}'), f'[ABORT] torch version mismatch: {torch.__version__}, expected ${TORCH_VER}'; print('[OK] torch', torch.__version__)"
 
 # ===================== PHASE 7: 鏈�缁堥獙璇? =====================
 echo "===== PHASE 7: 楠岃瘉瀵煎叆 + GPU ====="

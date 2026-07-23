@@ -37,6 +37,8 @@ CONDA_ENV=ta_opd
 CONDA_SH=/home/kejiechen/miniconda3/etc/profile.d/conda.sh
 # HuggingFace 镜像（国区拉取快）；不需要就删掉下面两行
 export HF_ENDPOINT=https://hf-mirror.com
+# 关闭 xet 传输后端（镜像不支持 cas-server.xethub.hf.co，会 401）；退回普通 HTTPS 下载
+export HF_HUB_DISABLE_XET=1
 
 mkdir -p "${MODELS}" "${DATA_DIR}" "${OUTPUT_ROOT}"
 source "${CONDA_SH}"
@@ -48,14 +50,26 @@ pip install -q huggingface_hub 2>/dev/null || pip install huggingface_hub
 # 注意：apex-llm 上 huggingface-cli 已被废弃不可用，改用 Python snapshot_download API
 python - <<PY
 from huggingface_hub import snapshot_download
-import os
+import os, json
+
+def is_complete(dest):
+    # 必须含 config.json，且权重分片齐全（对照 model.safetensors.index.json）
+    if not os.path.exists(os.path.join(dest, "config.json")):
+        return False
+    idx = os.path.join(dest, "model.safetensors.index.json")
+    if os.path.exists(idx):
+        with open(idx) as f:
+            shards = set(json.load(f).get("weight_map", {}).values())
+        return all(os.path.exists(os.path.join(dest, s)) for s in shards)
+    return os.path.exists(os.path.join(dest, "model.safetensors"))
+
 plan = [
     ("Qwen/Qwen3-4B", "${TEACHER_MODEL}"),
     ("Qwen/Qwen3-1.7B-Base", "${STUDENT_HF}"),
 ]
 for repo, dest in plan:
-    if os.path.isdir(dest) and any(os.scandir(dest)):
-        print(f"[skip] 已存在: {dest}")
+    if is_complete(dest):
+        print(f"[skip] 已存在且完整: {dest}")
         continue
     print(f"[download] {repo} -> {dest}")
     snapshot_download(repo, local_dir=dest)

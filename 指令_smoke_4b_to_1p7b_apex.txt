@@ -23,13 +23,13 @@ MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM
 CONDA_ENV=ta_opd                                  # 与 指令_环境准备_ta_opd.txt 创建的 env 名一致
 CONDA_SH=/home/kejiechen/miniconda3/etc/profile.d/conda.sh
 
-MODELS=/ext1/kejiechen/modelweights
+MODELS=/tmp/kejiechen/modelweights
 TEACHER_MODEL=${MODELS}/Qwen3-4B
 STUDENT_HF=${MODELS}/Qwen3-1.7B-Base
 STUDENT_TORCH_DIST=${MODELS}/Qwen3-1.7B-Base_torch_dist  # 已转 torch_dist（见前置步骤）
-DATA_DIR=/ext1/kejiechen/data
+DATA_DIR=/tmp/kejiechen/data
 PROMPT_DATA=${DATA_DIR}/dapo_train.parquet        # DAPO prompts 整理成 parquet，字段名 prompt
-OUTPUT_ROOT=/ext1/kejiechen/outputs/slime_opd
+OUTPUT_ROOT=/tmp/kejiechen/outputs/slime_opd
 # -------------------------------------------------
 
 # 6 卡分配：teacher 占 5；actor 用 0,1（2 卡）；rollout 用 2（1 卡）；3,4 备用

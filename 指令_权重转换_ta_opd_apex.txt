@@ -12,7 +12,8 @@
 # 【apex-llm 适配说明】
 #   - 原始 8x4090 脚本路径写死 /inspire/...；apex-llm 上改为：
 #       CODE_ROOT = /home/kejiechen/taopd-baseline（代码已在此）
-#       MODELS/DATA/OUTPUT 放到 /ext1（/home 已 100% 满，仅剩 19G）
+#       MODELS/DATA/OUTPUT 放到 /tmp/kejiechen（/home 已 100% 满仅剩 19G；
+#       /ext1、/ext0 为 root 只读，只有 /tmp 还有 61G 可写）
 #   - conda 在 apex-llm 非登录 shell 下不在 PATH，故用绝对路径 source
 #   - 网络：apex-llm 可直接访问 hf-mirror.com（无需 WSL 代理隧道）
 #   - DAPO 数据集用官方 BytedTsinghua-SIA/DAPO-Math-17k
@@ -24,13 +25,13 @@ CODE_ROOT=/home/kejiechen/taopd-baseline
 TAOPD_DIR=${CODE_ROOT}/TA-OPD
 SLIME_DIR=${TAOPD_DIR}/slime_ta_opd
 MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM                  # 与 指令_环境准备 一致（转换脚本需要）
-MODELS=/ext1/kejiechen/modelweights
+MODELS=/tmp/kejiechen/modelweights
 STUDENT_HF=${MODELS}/Qwen3-1.7B-Base                     # 原始 HF 权重（下载）
 STUDENT_TORCH_DIST=${MODELS}/Qwen3-1.7B-Base_torch_dist  # 转换产物（训练吃这个）
 TEACHER_MODEL=${MODELS}/Qwen3-4B                         # teacher 由 SGLang 直接吃 HF，无需转换
-DATA_DIR=/ext1/kejiechen/data
+DATA_DIR=/tmp/kejiechen/data
 PROMPT_DATA=${DATA_DIR}/dapo_train.parquet               # 训练 prompts（字段 prompt）
-OUTPUT_ROOT=/ext1/kejiechen/outputs/slime_opd
+OUTPUT_ROOT=/tmp/kejiechen/outputs/slime_opd
 # -------------------------------------------------
 CONDA_ENV=ta_opd
 CONDA_SH=/home/kejiechen/miniconda3/etc/profile.d/conda.sh

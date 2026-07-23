@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ============================================================
+# 指令草稿（AI 辅助生成，需本人审阅 / 填写 / 认领后使用）
+# 目标：Qwen3-4B -> Qwen3-1.7B 的 TA-OPD baseline「smoke 打通」
+# 机器：apex-llm（6 x A6000 / sm86，单卡 48G，足够跑这组轻量模型）
+# 用法：填好【填写区】后，在 slime_ta_opd 所在机器上 bash 本文件
+# 遵循经验规则：本文件提交 git，远程 git pull 后执行
+# ------------------------------------------------------------
+# 【apex-llm 适配说明】
+#   - 路径改为 apex 布局：CODE_ROOT=/home/kejiechen/taopd-baseline，
+#     MODELS/DATA/OUTPUT 放 /ext1（/home 已满）
+#   - GPU 布局按 6 卡重排：teacher 占 5；Ray 管 0,1,2,3,4
+#     （actor 用 0,1 共 2 卡；rollout 用 2 共 1 卡；3,4 备用）
+#   - CONDA_SH 用绝对路径（apex 非登录 shell 无 conda）
+#   - 本机 ta_opd 已含 sglang/ray/megatron/slime，直接用，无需 verl 回退
+# ============================================================
+set -eo pipefail
+
+# ---------- 【填写区】路径与模型（已按 apex-llm 填写） ----------
+CODE_ROOT=/home/kejiechen/taopd-baseline
+SLIME_DIR=${CODE_ROOT}/TA-OPD/slime_ta_opd        # 完整 slime 树（含 examples/on_policy_distillation/）
+MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM
+CONDA_ENV=ta_opd                                  # 与 指令_环境准备_ta_opd.txt 创建的 env 名一致
+CONDA_SH=/home/kejiechen/miniconda3/etc/profile.d/conda.sh
+
+MODELS=/ext1/kejiechen/modelweights
+TEACHER_MODEL=${MODELS}/Qwen3-4B
+STUDENT_HF=${MODELS}/Qwen3-1.7B-Base
+STUDENT_TORCH_DIST=${MODELS}/Qwen3-1.7B-Base_torch_dist  # 已转 torch_dist（见前置步骤）
+DATA_DIR=/ext1/kejiechen/data
+PROMPT_DATA=${DATA_DIR}/dapo_train.parquet        # DAPO prompts 整理成 parquet，字段名 prompt
+OUTPUT_ROOT=/ext1/kejiechen/outputs/slime_opd
+# -------------------------------------------------
+
+# 6 卡分配：teacher 占 5；actor 用 0,1（2 卡）；rollout 用 2（1 卡）；3,4 备用
+export TEACHER_GPU=5
+export RAY_GPUS=0,1,2,3,4
+export ACTOR_NUM_GPUS_PER_NODE=2
+export ROLLOUT_NUM_GPUS=1
+export COLOCATE=0
+
+export SLIME_DIR MEGATRON_LM_DIR OUTPUT_ROOT CONDA_ENV CONDA_SH
+export TEACHER_MODEL STUDENT_HF STUDENT_TORCH_DIST PROMPT_DATA
+export OPD_TOPK_METRICS_K=16                       # K=16，论文统一 support 统计量
+
+# 环境激活（apex 非登录 shell 无 conda，用绝对路径）
+source "${CONDA_SH}"; conda activate "${CONDA_ENV}"
+
+run_one () {
+  local NAME="$1"; local MASK="$2"; local RATIO="$3"
+  echo "===== SMOKE RUN: ${NAME} (mask=${MASK} ratio=${RATIO}) ====="
+  RUN_NAME="smoke_${NAME}_$(date +%Y%m%d_%H%M%S)" \
+  SAVE_DIR="${OUTPUT_ROOT}/${NAME}" \
+  NUM_ROLLOUT=4 \
+  ROLLOUT_BATCH_SIZE=4 \
+  N_SAMPLES_PER_PROMPT=2 \
+  GLOBAL_BATCH_SIZE=8 \
+  ROLLOUT_MAX_RESPONSE_LEN=1024 \
+  ROLLOUT_TEMPERATURE=1.0 \
+  OPD_BUDGET_MASK="${MASK}" \
+  OPD_BUDGET_RATIO="${RATIO}" \
+  OPD_TOKEN_BANK_PAIR_ID=qwen3_4b_to_qwen3_1p7b \
+  bash "${SLIME_DIR}/examples/on_policy_distillation/run-qwen3-1.7B-sampled-opd-sglang.sh"
+  echo "===== DONE: ${NAME} -> ${OUTPUT_ROOT}/${NAME} ====="
+}
+
+# 1) Full OPD baseline：mask=none（全部 response token 都作直接 OPD 目标）
+run_one pure_opd none 1.0
+
+# 2) TA-OPD：mask=dlearn_high，10% 监督 token 预算
+run_one ta_opd dlearn_high 0.10
+
+echo "SMOKE 完成：检查两个 SAVE_DIR 下是否生成 latest_checkpointed_iteration.txt"
+echo "  ${OUTPUT_ROOT}/pure_opd"
+echo "  ${OUTPUT_ROOT}/ta_opd"

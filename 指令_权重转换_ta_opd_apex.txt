@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# ============================================================
+# 指令草稿（AI 辅助生成，需本人审阅 / 填写 / 认领后使用）
+# 目标：准备 TA-OPD baseline 的「模型权重 + 训练数据」。
+#       1) 下载 Qwen3-4B(teacher) / Qwen3-1.7B-Base(student)
+#       2) student HF -> torch_dist（Megatron 训练只吃这个格式）
+#       3) DAPO prompts -> parquet（字段 prompt），供 rollout 使用
+# 前置：指令_环境准备_ta_opd.txt 已完成（ta_opd 环境可用）
+# 用法：填好【填写区】-> bash 本文件；再跑 指令_smoke_4b_to_1p7b_apex.txt
+# 遵循经验规则：本文件提交 git，远程 git pull 后执行
+# ------------------------------------------------------------
+# 【apex-llm 适配说明】
+#   - 原始 8x4090 脚本路径写死 /inspire/...；apex-llm 上改为：
+#       CODE_ROOT = /home/kejiechen/taopd-baseline（代码已在此）
+#       MODELS/DATA/OUTPUT 放到 /ext1（/home 已 100% 满，仅剩 19G）
+#   - conda 在 apex-llm 非登录 shell 下不在 PATH，故用绝对路径 source
+#   - 网络：apex-llm 可直接访问 hf-mirror.com（无需 WSL 代理隧道）
+#   - DAPO 数据集用官方 BytedTsinghua-SIA/DAPO-Math-17k
+# ============================================================
+set -eo pipefail
+
+# ---------- 【填写区】路径（已按 apex-llm 机器填写） ----------
+CODE_ROOT=/home/kejiechen/taopd-baseline
+TAOPD_DIR=${CODE_ROOT}/TA-OPD
+SLIME_DIR=${TAOPD_DIR}/slime_ta_opd
+MEGATRON_LM_DIR=${CODE_ROOT}/Megatron-LM                  # 与 指令_环境准备 一致（转换脚本需要）
+MODELS=/ext1/kejiechen/modelweights
+STUDENT_HF=${MODELS}/Qwen3-1.7B-Base                     # 原始 HF 权重（下载）
+STUDENT_TORCH_DIST=${MODELS}/Qwen3-1.7B-Base_torch_dist  # 转换产物（训练吃这个）
+TEACHER_MODEL=${MODELS}/Qwen3-4B                         # teacher 由 SGLang 直接吃 HF，无需转换
+DATA_DIR=/ext1/kejiechen/data
+PROMPT_DATA=${DATA_DIR}/dapo_train.parquet               # 训练 prompts（字段 prompt）
+OUTPUT_ROOT=/ext1/kejiechen/outputs/slime_opd
+# -------------------------------------------------
+CONDA_ENV=ta_opd
+CONDA_SH=/home/kejiechen/miniconda3/etc/profile.d/conda.sh
+# HuggingFace 镜像（国区拉取快）；不需要就删掉下面两行
+export HF_ENDPOINT=https://hf-mirror.com
+
+mkdir -p "${MODELS}" "${DATA_DIR}" "${OUTPUT_ROOT}"
+source "${CONDA_SH}"
+conda activate "${CONDA_ENV}"   # 已全局关闭 nounset，conda 钩子不再报错
+
+# ===================== PHASE 1: 下载模型 =====================
+echo "===== PHASE 1: 下载 Qwen3-4B / Qwen3-1.7B-Base ====="
+pip install -q huggingface_hub 2>/dev/null || pip install huggingface_hub
+# teacher（4B）：SGLang 直接吃 HF 目录，无需转换
+[ -d "${TEACHER_MODEL}" ] && echo "[skip] teacher 已存在: ${TEACHER_MODEL}" || \
+  huggingface-cli download Qwen/Qwen3-4B --local-dir "${TEACHER_MODEL}"
+# student（1.7B）：先下 HF，下一步转 torch_dist
+[ -d "${STUDENT_HF}" ] && echo "[skip] student HF 已存在: ${STUDENT_HF}" || \
+  huggingface-cli download Qwen/Qwen3-1.7B-Base --local-dir "${STUDENT_HF}"
+
+# ===================== PHASE 2: student HF -> torch_dist =====================
+echo "===== PHASE 2: 转换 student -> torch_dist ====="
+if [ -f "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt" ]; then
+  echo "[skip] torch_dist 已存在: ${STUDENT_TORCH_DIST}"
+else
+  cd "${SLIME_DIR}"
+  SLIME_DIR=${SLIME_DIR} \
+  HF_MODEL=${STUDENT_HF} \
+  SAVE_DIR=${STUDENT_TORCH_DIST} \
+  NPROC_PER_NODE=1 \
+  MEGATRON_LM_DIR=${MEGATRON_LM_DIR} \
+  bash convert_qwen3_1_7b_to_torch_dist.sh
+fi
+echo "[CHECK] student torch_dist 含 latest_checkpointed_iteration.txt ?"
+ls -l "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt"
+
+# ===================== PHASE 3: 准备 DAPO prompt 数据 =====================
+echo "===== PHASE 3: DAPO prompts -> parquet（字段 prompt） ====="
+# 需要 datasets / pandas / pyarrow（环境准备脚本未装，这里补齐）
+pip install -q datasets pandas pyarrow 2>/dev/null || pip install datasets pandas pyarrow
+# 训练用 prompts 来自 DAPO。下面用 datasets 抽取 prompt 字段存成 parquet。
+# 仅取 SAMPLE 条用于 smoke（正式跑去掉限制或调大 SAMPLE）。
+SAMPLE=2000
+python - <<PY
+import datasets
+out = "${PROMPT_DATA}"
+sample = ${SAMPLE}
+# 官方 DAPO-Math-17k（apex-llm 上验证可经 hf-mirror 访问）
+ds_name = "BytedTsinghua-SIA/DAPO-Math-17k"
+ds = datasets.load_dataset(ds_name, split="train")
+print("数据集列名:", ds.column_names, " 总行数:", len(ds))
+rows = []
+for ex in ds:
+    if sample and len(rows) >= sample:
+        break
+    p = ex.get("prompt")
+    # prompt 可能是 [{"role":"user","content":"..."}] 或直接是字符串
+    if isinstance(p, list):
+        p = p[0].get("content") if p and isinstance(p[0], dict) else str(p)
+    elif not isinstance(p, str):
+        p = str(p)
+    rows.append({"prompt": p})
+import pandas as pd
+pd.DataFrame(rows).to_parquet(out)
+print(f"[OK] 写入 {out}，共 {len(rows)} 条，字段: prompt")
+PY
+echo "[CHECK] 数据文件:"; ls -l "${PROMPT_DATA}"
+
+# ===================== PHASE 4: 汇总校验 =====================
+echo "===== PHASE 4: 校验四件套 ====="
+for p in "${TEACHER_MODEL}" "${STUDENT_HF}" "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt" "${PROMPT_DATA}"; do
+  if [ -e "$p" ]; then echo "  [OK] $p"; else echo "  [MISSING] $p"; fi
+done
+echo "下一步：bash 指令_smoke_4b_to_1p7b_apex.txt"

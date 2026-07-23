@@ -90,7 +90,7 @@ else
   SAVE_DIR=${STUDENT_TORCH_DIST} \
   NPROC_PER_NODE=1 \
   MEGATRON_LM_DIR=${MEGATRON_LM_DIR} \
-  EXTRA_MEGATRON_ARGS="--transformer-impl local" \
+  EXTRA_MEGATRON_ARGS="--transformer-impl local --no-rope-fusion" \
   bash convert_qwen3_1_7b_to_torch_dist.sh
 fi
 echo "[CHECK] student torch_dist 含 latest_checkpointed_iteration.txt ?"

@@ -66,9 +66,12 @@ pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
   || { echo "  ❌ sgl-kernel==0.1.0 装不上 (rollout 引擎必需)"; false; }
 
 # bare sglang 不带 [all] extras 的运行时依赖 (teacher/rollout SGLang server 要用)
+# 一次性补齐 sglang[all]==0.4.1 通常会带上的常见依赖, 避免 server 启动时 import 失败
 pip install \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
-  hf_transfer decord soundfile pillow requests aiohttp psutil
+  hf_transfer decord soundfile pillow requests aiohttp psutil \
+  pyzmq outlines prometheus_client setproctitle diskcache cloudpickle \
+  tiktoken numba coloredlogs packaging sentencepiece protobuf nvidia-ml-py openai
 
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \

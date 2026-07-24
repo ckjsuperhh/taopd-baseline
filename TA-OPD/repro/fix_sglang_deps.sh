@@ -8,6 +8,7 @@ activate_env
 
 echo "=== 装 sglang[all] 通常会带上的常见依赖 ==="
 # sglang==0.4.1 bare 不带这些, 但 server / rollout 都要
+# 一次性补齐, 不再一个个打地鼠
 pip install \
   orjson \
   fastapi \
@@ -22,7 +23,21 @@ pip install \
   pillow \
   requests \
   aiohttp \
-  psutil
+  psutil \
+  pyzmq \
+  outlines \
+  prometheus_client \
+  setproctitle \
+  diskcache \
+  cloudpickle \
+  tiktoken \
+  numba \
+  coloredlogs \
+  packaging \
+  sentencepiece \
+  protobuf \
+  nvidia-ml-py \
+  openai
 
 echo ""
 echo "=== 测试 sglang.srt.server 关键 import ==="
@@ -35,6 +50,11 @@ for mod in [
     'orjson',
     'fastapi',
     'uvicorn',
+    'uvloop',
+    'zmq',
+    'outlines',
+    'prometheus_client',
+    'setproctitle',
 ]:
     try:
         __import__(mod)

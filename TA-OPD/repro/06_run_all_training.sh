@@ -157,8 +157,8 @@ _wait_ray_job() {
   while true; do
     local out
     out="$(ray job status --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>&1 || true)"
-    if echo "${out}" | grep -qi "succeeded"; then return 0; fi
-    if echo "${out}" | grep -qi "failed\|stopped"; then
+    if echo "${out}" | grep -q "Status for job.*: SUCCEEDED"; then return 0; fi
+    if echo "${out}" | grep -q "Status for job.*: FAILED\|Status for job.*: STOPPED"; then
       echo "  Ray job ${job_id} FAILED" >&2
       ray job logs --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>/dev/null | tail -100 >&2 || true
       return 1

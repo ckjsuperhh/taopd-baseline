@@ -144,14 +144,14 @@ run_smoke() {
   while true; do
     local status_out
     status_out="$(ray job status --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>&1 || true)"
-    if echo "${status_out}" | grep -qi "succeeded"; then
+    if echo "${status_out}" | grep -q "Status for job.*: SUCCEEDED"; then
       echo "  SUCCEEDED"
       break
-    elif echo "${status_out}" | grep -qi "failed"; then
+    elif echo "${status_out}" | grep -q "Status for job.*: FAILED"; then
       echo "  FAILED" >&2
       ray job logs --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>/dev/null | tail -100 >&2 || true
       return 1
-    elif echo "${status_out}" | grep -qi "stopped"; then
+    elif echo "${status_out}" | grep -q "Status for job.*: STOPPED"; then
       echo "  STOPPED" >&2
       return 1
     fi

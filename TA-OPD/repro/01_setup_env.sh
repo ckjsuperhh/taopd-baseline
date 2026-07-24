@@ -5,13 +5,13 @@ source "${SCRIPT_DIR}/00_env.sh"
 
 echo "========================================="
 echo " Step 1: Setup conda environment"
-echo " (apex 验证过的方案)"
+echo " (完全复制 apex 的方案)"
 echo "========================================="
 
 # ── 1. Conda env ─────────────────────────────────────────────────────────
-echo "[1/7] Conda env '${CONDA_ENV}' (Python 3.10)..."
+echo "[1/6] Conda env '${CONDA_ENV}' (Python 3.10)..."
 if conda env list | grep -qw "${CONDA_ENV}"; then
-  echo "  Removing existing env..."
+  echo "  Removing existing..."
   conda env remove -n "${CONDA_ENV}" -y
 fi
 conda create -n "${CONDA_ENV}" python=3.10 pip -y
@@ -20,81 +20,80 @@ activate_env
 ENV_PREFIX="$(python3 -c 'import sys; print(sys.prefix)')"
 echo "  ENV_PREFIX = ${ENV_PREFIX}"
 
-# ── 2. PyTorch 2.5.1 + CUDA 12.4 ────────────────────────────────────────
-# apex 用的就是这个版本，4090 sm_89 也完全兼容 cu124
-echo "[2/7] PyTorch 2.5.1 + cu124..."
+# ── 2. conda-forge: CUDA toolkit 12.4 + GCC 12 + cuDNN + NCCL ──────────
+# apex 上就是这么装的，nvcc 直接在 conda env 的 bin/ 里
+echo "[2/6] conda install CUDA toolkit 12.4 + GCC 12 + cuDNN + NCCL..."
+conda install -c conda-forge -y \
+  cuda-toolkit=12.4 \
+  gcc=12.4 \
+  gxx=12.4 \
+  cudnn \
+  nccl \
+  curl \
+  gdb
+
+# 验证 nvcc
+export CUDA_HOME="${ENV_PREFIX}"
+export PATH="${ENV_PREFIX}/bin:${PATH}"
+echo "  nvcc: $(which nvcc) — $(nvcc --version 2>/dev/null | tail -1)"
+echo "  gcc:  $(which gcc) — $(gcc --version 2>/dev/null | head -1)"
+echo "  CUDA_HOME = ${CUDA_HOME}"
+
+# ── 3. PyTorch 2.5.1 + cu124 ────────────────────────────────────────────
+echo "[3/6] pip install torch 2.5.1 + cu124..."
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124
 
 python3 -c "
 import torch
-print(f'  torch={torch.__version__} cuda={torch.version.cuda} available={torch.cuda.is_available()}')
+print(f'  torch={torch.__version__} cuda={torch.version.cuda}')
 assert torch.__version__.startswith('2.5.'), f'Wrong torch: {torch.__version__}'
+assert torch.cuda.is_available(), 'CUDA not available'
 "
 
-# ── 3. 基础依赖（不会动 torch 的包）────────────────────────────────────
-echo "[3/7] Basic deps..."
+# ── 4. SGLang + flash-attn + 其他依赖 ──────────────────────────────────
+echo "[4/6] pip install sglang + flash-attn + deps..."
+pip install "sglang[all]>=0.4.0" || pip install sglang
+# sglang 可能拉高 torch，回退
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+  --index-url https://download.pytorch.org/whl/cu124 \
+  --force-reinstall --no-deps
+
+MAX_JOBS=4 pip install flash-attn --no-build-isolation
+
+pip install "ray[default]>=2.9"
 pip install transformers datasets accelerate safetensors
 pip install pyarrow pandas numpy scipy scikit-learn
 pip install matplotlib seaborn
 pip install einops tiktoken sentencepiece protobuf
 pip install wandb tensorboard
-pip install "ray[default]>=2.9"
 pip install lm-eval>=0.4.5
 
-# ── 4. SGLang（安装后强制回退 torch）──────────────────────────────────
-echo "[4/7] SGLang..."
-pip install "sglang[all]>=0.4.0" || pip install sglang
-
-# sglang 可能拉高 torch，立刻回退
-echo "  Re-pinning torch..."
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
-  --index-url https://download.pytorch.org/whl/cu124 \
-  --force-reinstall --no-deps
-
-python3 -c "import torch; print(f'  torch={torch.__version__} (must be 2.5.x)'); assert torch.__version__.startswith('2.5.')"
-
-# ── 5. flash-attn ────────────────────────────────────────────────────────
-echo "[5/7] flash-attn..."
-# 找 CUDA_HOME
-if [[ -z "${CUDA_HOME:-}" ]] || [[ ! -f "${CUDA_HOME}/bin/nvcc" ]]; then
-  for d in /usr/local/cuda /usr/local/cuda-12* /opt/cuda "${ENV_PREFIX}"; do
-    if [[ -f "$d/bin/nvcc" ]]; then
-      export CUDA_HOME="$d"
-      break
-    fi
-  done
-fi
-export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
-export PATH="${CUDA_HOME}/bin:${PATH}"
-
-if [[ -f "${CUDA_HOME}/bin/nvcc" ]]; then
-  echo "  CUDA_HOME=${CUDA_HOME}, nvcc=$(nvcc --version | tail -1)"
-  MAX_JOBS=4 pip install flash-attn --no-build-isolation 2>&1 || \
-    echo "  WARNING: flash-attn 编译失败，训练时可用 --attention-backend eager 替代"
-else
-  echo "  WARNING: nvcc 找不到。手动设置 CUDA_HOME 后重新运行此脚本。"
-  echo "  或: conda install -c nvidia cuda-toolkit"
+# 最终检查 torch 没被升级
+CURRENT="$(python3 -c 'import torch; print(torch.__version__)')"
+if [[ ! "${CURRENT}" == 2.5.* ]]; then
+  echo "  WARNING: torch 被升级到 ${CURRENT}，回退中..."
+  pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+    --index-url https://download.pytorch.org/whl/cu124 --force-reinstall --no-deps
 fi
 
-# ── 6. Megatron-LM + DCP patch ──────────────────────────────────────────
-echo "[6/7] Megatron-LM..."
+# ── 5. Megatron-LM + DCP patch ──────────────────────────────────────────
+echo "[5/6] Megatron-LM..."
 if [[ ! -d "${MEGATRON_LM_DIR}" ]]; then
   git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_LM_DIR}"
 fi
-
 cd "${MEGATRON_LM_DIR}"
-PATCH_FILE="${REPO_ROOT}/docs/megatron_apex_patches.patch"
-if [[ -f "${PATCH_FILE}" ]] && git apply --check "${PATCH_FILE}" 2>/dev/null; then
-  git apply "${PATCH_FILE}"
+PATCH="${REPO_ROOT}/docs/megatron_apex_patches.patch"
+if [[ -f "${PATCH}" ]] && git apply --check "${PATCH}" 2>/dev/null; then
+  git apply "${PATCH}"
   echo "  Applied DCP patches"
 fi
 cd "${PROJECT_ROOT}"
 
-# ── 7. 代码修复 + pyarrow fix（和 apex 完全一致）───────────────────────
-echo "[7/7] Code fixes (apex 同款)..."
+# ── 6. 代码修复（和 apex 完全一样）─────────────────────────────────────
+echo "[6/6] Code fixes..."
 
-# pyarrow SIGSEGV fix — 和 apex 一模一样的 sitecustomize.py
+# pyarrow SIGSEGV fix
 SITE_PACKAGES="$(python3 -c 'import site; print(site.getsitepackages()[0])')"
 cat > "${SITE_PACKAGES}/sitecustomize.py" << 'PYEOF'
 import os
@@ -107,24 +106,23 @@ except Exception:
     pass
 PYEOF
 
-# LD_LIBRARY_PATH — 和 apex 一样：conda lib 在前
+# LD_LIBRARY_PATH — conda lib 在前（和 apex 一样）
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
-# ProcessGroup 构造修复
+# ProcessGroup ctor
 RPG="${SLIME_DIR}/slime/utils/reloadable_process_group.py"
 if [[ -f "${RPG}" ]] && grep -q 'super().__init__(rank=' "${RPG}" 2>/dev/null; then
   sed -i 's/super().__init__(rank=[^)]*)/super().__init__(0, 0)/' "${RPG}"
   echo "  ProcessGroup ctor fixed"
 fi
 
-# placement_group.py — RolloutManager
+# RolloutManager
 PG="${SLIME_DIR}/slime/ray/placement_group.py"
 if [[ -f "${PG}" ]] && grep -q 'RolloutManager\.options(' "${PG}" 2>/dev/null; then
   sed -i 's/RolloutManager\.options(/ray.remote(RolloutManager).options(/' "${PG}"
-  echo "  RolloutManager ray.remote fixed"
+  echo "  RolloutManager fixed"
 fi
 
-# rollout.py — @ray.remote + faulthandler
 RL="${SLIME_DIR}/slime/ray/rollout.py"
 if [[ -f "${RL}" ]] && grep -q '@ray\.remote' "${RL}" 2>/dev/null; then
   sed -i '/@ray\.remote/d' "${RL}"
@@ -134,7 +132,7 @@ if [[ -f "${RL}" ]] && grep -q '@ray\.remote' "${RL}" 2>/dev/null; then
   echo "  rollout.py fixed"
 fi
 
-# curl wrapper（和 apex 一样）
+# curl wrapper（conda curl 已经装了，但保险起见还是加 wrapper）
 mkdir -p "${HOME}/.local/bin"
 cat > "${HOME}/.local/bin/curl" << 'EOF'
 #!/usr/bin/env bash
@@ -150,23 +148,22 @@ python3 -c "
 import torch
 v = torch.__version__
 ok = '✅' if v.startswith('2.5.') else '❌'
-print(f'  {ok} torch {v} (need 2.5.x)')
-print(f'     CUDA={torch.version.cuda}, GPUs={torch.cuda.device_count() if torch.cuda.is_available() else 0}')
+print(f'  {ok} torch {v} cuda={torch.version.cuda} GPUs={torch.cuda.device_count()}')
 try:
     import flash_attn; print(f'  ✅ flash_attn {flash_attn.__version__}')
-except: print('  ⚠️  flash_attn not installed')
+except: print('  ❌ flash_attn')
 try:
     import sglang; print(f'  ✅ sglang {sglang.__version__}')
-except: print('  ❌ sglang not installed')
+except: print('  ❌ sglang')
 try:
     import ray; print(f'  ✅ ray {ray.__version__}')
-except: print('  ❌ ray not installed')
+except: print('  ❌ ray')
 import transformers; print(f'  ✅ transformers {transformers.__version__}')
 import pyarrow; print(f'  ✅ pyarrow {pyarrow.__version__}')
 import megatron; print(f'  ✅ megatron')
 "
-
 echo ""
 echo "========================================="
-echo " Done! Conda env: ${CONDA_ENV}"
+echo " Done! conda env: ${CONDA_ENV}"
+echo " CUDA_HOME: ${CUDA_HOME}"
 echo "========================================="

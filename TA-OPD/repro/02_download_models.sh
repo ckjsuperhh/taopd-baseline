@@ -10,12 +10,23 @@ echo "========================================="
 
 mkdir -p "${MODEL_DIR}"
 
+# Detect HF CLI: new name is `hf`, old name is `huggingface-cli`
+if command -v hf >/dev/null 2>&1; then
+  HF_CLI="hf"
+elif command -v huggingface-cli >/dev/null 2>&1; then
+  HF_CLI="huggingface-cli"
+else
+  echo "❌ 找不到 hf/huggingface-cli (conda env 里应该已装 huggingface_hub)"
+  exit 1
+fi
+echo "Using HF CLI: ${HF_CLI}"
+
 # ── 1. Download Qwen3-4B (teacher) ──────────────────────────────────────
 echo "[1/2] Downloading Qwen3-4B (teacher)..."
 if [[ -d "${TEACHER_MODEL}" ]] && [[ -f "${TEACHER_MODEL}/config.json" ]]; then
   echo "  Already exists at ${TEACHER_MODEL}, skipping."
 else
-  huggingface-cli download Qwen/Qwen3-4B \
+  ${HF_CLI} download Qwen/Qwen3-4B \
     --local-dir "${TEACHER_MODEL}" \
     --local-dir-use-symlinks False
   echo "  Downloaded to ${TEACHER_MODEL}"
@@ -26,7 +37,7 @@ echo "[2/2] Downloading Qwen3-1.7B (student)..."
 if [[ -d "${STUDENT_HF}" ]] && [[ -f "${STUDENT_HF}/config.json" ]]; then
   echo "  Already exists at ${STUDENT_HF}, skipping."
 else
-  huggingface-cli download Qwen/Qwen3-1.7B \
+  ${HF_CLI} download Qwen/Qwen3-1.7B \
     --local-dir "${STUDENT_HF}" \
     --local-dir-use-symlinks False
   echo "  Downloaded to ${STUDENT_HF}"

@@ -43,10 +43,10 @@ esac
 echo "=== 卸载旧版 ==="
 pip uninstall -y sglang sgl-kernel sglang-router 2>/dev/null || true
 
-echo "=== 安装 sglang==0.4.1 + sgl-kernel (详细日志) ==="
+echo "=== 安装 sglang==0.4.1 + sgl-kernel==0.1.0 (详细日志) ==="
 FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
 pip install --verbose "sglang==0.4.1" 2>&1 | tee /tmp/sglang_install.log
-pip install --verbose sgl-kernel --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tee -a /tmp/sglang_install.log
+pip install --verbose "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tee -a /tmp/sglang_install.log
 
 echo ""
 echo "=== 安装后状态 ==="

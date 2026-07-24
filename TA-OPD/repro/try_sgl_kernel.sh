@@ -30,10 +30,11 @@ except Exception as e:
 "
 echo ""
 
-echo "=== 安装 sgl-kernel (via flashinfer.ai) ==="
-pip install sgl-kernel --extra-index-url "${FLASHINFER_INDEX}" \
-  || { echo "❌ sgl-kernel 装不上"; exit 1; }
-echo "✅ sgl-kernel 装好"
+echo "=== 安装 sgl-kernel==0.1.0 (via flashinfer.ai) ==="
+pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
+  || pip install "sgl-kernel==0.1.0" \
+  || { echo "❌ sgl-kernel==0.1.0 装不上"; exit 1; }
+echo "✅ sgl-kernel==0.1.0 装好"
 
 echo ""
 echo "=== 最终状态 ==="

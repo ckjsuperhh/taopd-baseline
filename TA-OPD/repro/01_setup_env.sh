@@ -55,13 +55,15 @@ assert torch.cuda.is_available(), 'CUDA not available'
 
 # ── 4. SGLang + flash-attn + 其他依赖 ──────────────────────────────────
 echo "[4/6] pip install sglang + flash-attn + deps..."
-# 已知可行的组合: sglang==0.4.1 + sgl-kernel (从 flashinfer.ai wheel 索引拉最新)
-# sglang[all]==0.4.1 在 2026 年会因 flashinfer==0.1.6 yanked 失败，所以直接走 bare + sgl-kernel。
+# 已验证可行的组合 (2026-07 Inspur):
+#   sglang==0.4.1 + sgl-kernel==0.1.0 + torch==2.5.1+cu124
+# 注意: sgl-kernel 不能用最新版 (0.3.21 给 torch 2.7+ 编的, c10 ABI 不匹配)
 FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
 
 pip install "sglang==0.4.1" || { echo "  ❌ sglang install failed"; false; }
-pip install sgl-kernel --extra-index-url "${FLASHINFER_INDEX}" \
-  || { echo "  ❌ sgl-kernel 装不上 (rollout 引擎必需)"; false; }
+pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
+  || pip install "sgl-kernel==0.1.0" \
+  || { echo "  ❌ sgl-kernel==0.1.0 装不上 (rollout 引擎必需)"; false; }
 
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \

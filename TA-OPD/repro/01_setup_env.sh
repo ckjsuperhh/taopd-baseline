@@ -71,7 +71,8 @@ pip install \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   pyzmq outlines prometheus_client setproctitle diskcache cloudpickle \
-  tiktoken numba coloredlogs packaging sentencepiece protobuf nvidia-ml-py openai
+  tiktoken numba coloredlogs packaging sentencepiece protobuf nvidia-ml-py openai \
+  pyairports
 
 # vllm: sglang server 依赖。钉已知与 torch 2.5.1+cu124 兼容的版本, 装完回退 torch
 for V in "0.6.3.post1" "0.6.3" "0.6.2" "0.6.1.post2"; do
@@ -83,6 +84,14 @@ pip install vllm 2>/dev/null || echo "  ⚠ vllm 装不上 (sglang 可能 fallba
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
   --force-reinstall --no-deps
+
+# flashinfer: sglang 0.4.1 的 attention backend。默认 PyPI 的 0.1.6 已 yanked,
+# 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5)。允许失败 (sglang 可 fallback 到 triton)
+for V in "0.2.1.post1" "0.2.1" "0.2.0" "0.1.6"; do
+  if pip install "flashinfer==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null; then break; fi
+done
+pip install flashinfer --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null \
+  || echo "  ⚠ flashinfer 装不上 (sglang 可能 fallback 到 triton, 不一定致命)"
 
 # flash-attn 编译非常慢且容易失败；允许失败（训练时如果不用 flash-attn，Megatron 会 fallback）
 MAX_JOBS=4 pip install flash-attn --no-build-isolation || echo "  ⚠ flash-attn failed (non-fatal; Megatron can fall back)"

@@ -37,7 +37,27 @@ pip install \
   sentencepiece \
   protobuf \
   nvidia-ml-py \
-  openai
+  openai \
+  pyairports
+
+# flashinfer: sglang 0.4.1 的 attention backend。
+#   - 默认 PyPI 的 flashinfer==0.1.6 已被 yanked, 直接 pip install 会失败
+#   - 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5), 这里能拿到 0.1.6 / 0.2.x
+echo ""
+echo "=== 装 flashinfer (从 flashinfer.ai wheel 索引) ==="
+FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
+FLASHINFER_OK=0
+for V in "0.2.1.post1" "0.2.1" "0.2.0" "0.1.6"; do
+  echo "--- 试 flashinfer==${V} ---"
+  if pip install "flashinfer==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tail -5; then
+    FLASHINFER_OK=1; break
+  fi
+done
+if [[ "${FLASHINFER_OK}" -eq 0 ]]; then
+  echo "⚠ 钉版本失败, 试最新 flashinfer (从 flashinfer.ai 索引)..."
+  pip install flashinfer --extra-index-url "${FLASHINFER_INDEX}" \
+    || echo "  ❌ flashinfer 装不上 (sglang 可能 fallback 到 triton, 不一定致命)"
+fi
 
 # vllm: sglang server 依赖但 vllm 可能拉高 torch。策略:
 #   - 钉 vllm 到已知与 torch 2.5.1+cu124 兼容的版本
@@ -79,6 +99,8 @@ for mod in [
     'prometheus_client',
     'setproctitle',
     'vllm',
+    'flashinfer',
+    'pyairports',
 ]:
     try:
         __import__(mod)

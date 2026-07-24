@@ -43,7 +43,7 @@ else
 fi
 
 cd "${MEGATRON_LM_DIR}"
-PATCH_FILE="${PROJECT_ROOT}/docs/megatron_apex_patches.patch"
+PATCH_FILE="${REPO_ROOT}/docs/megatron_apex_patches.patch"
 if [[ -f "${PATCH_FILE}" ]]; then
   if git apply --check "${PATCH_FILE}" 2>/dev/null; then
     git apply "${PATCH_FILE}"

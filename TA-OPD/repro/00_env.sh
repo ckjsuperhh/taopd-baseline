@@ -11,10 +11,11 @@ DATA_DIR="${DATA_DIR:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/data
 MODEL_DIR="${MODEL_DIR:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/modelweights}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/outputs}"
 
-SLIME_DIR="${PROJECT_ROOT}/slime_ta_opd"
+REPO_ROOT="${PROJECT_ROOT}/TA-OPD"
+SLIME_DIR="${REPO_ROOT}/slime_ta_opd"
 MEGATRON_LM_DIR="${PROJECT_ROOT}/Megatron-LM"
-TOOLS_DIR="${PROJECT_ROOT}/tools"
-REPRO_DIR="${PROJECT_ROOT}/repro"
+TOOLS_DIR="${REPO_ROOT}/tools"
+REPRO_DIR="${REPO_ROOT}/repro"
 
 TEACHER_MODEL="${MODEL_DIR}/Qwen3-4B"
 STUDENT_HF="${MODEL_DIR}/Qwen3-1.7B"

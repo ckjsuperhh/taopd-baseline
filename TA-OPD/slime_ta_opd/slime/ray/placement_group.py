@@ -181,7 +181,7 @@ def create_training_models(args, pgs, rollout_manager):
 
 
 def create_rollout_manager(args, pg):
-    rollout_manager = RolloutManager.options(
+    rollout_manager = ray.remote(RolloutManager).options(
         num_cpus=1,
         num_gpus=0,
     ).remote(args, pg)

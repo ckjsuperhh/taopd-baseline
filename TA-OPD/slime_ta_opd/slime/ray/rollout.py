@@ -1,3 +1,6 @@
+import faulthandler as _fh
+import sys as _sys
+_fh.enable(file=_sys.stderr, all_threads=True)
 import dataclasses
 import itertools
 import logging
@@ -346,50 +349,68 @@ class RolloutServer:
         return ray.get(handles) if handles else []
 
 
-@ray.remote
 class RolloutManager:
     """The class to run rollout and convert rollout data to training data."""
 
     def __init__(self, args, pg):
-        configure_logger()
+        import os as _os
+        with open('/tmp/kejiechen/rm_init_enter.log', 'a') as _ef:
+            _ef.write(f'ENTER pid={_os.getpid()}\n'); _ef.flush()
+        def _step(s):
+            try:
+                with open('/tmp/kejiechen/rm_steps.log','a') as _sf:
+                    _sf.write(s+'\n'); _sf.flush()
+            except Exception:
+                pass
+        try:
+            _step('init start')
+            configure_logger()
 
-        self.pg = pg
-        self.args = args
+            self.pg = pg
+            self.args = args
 
-        data_source_cls = load_function(self.args.data_source_path)
-        self.data_source = data_source_cls(args)
+            data_source_cls = load_function(self.args.data_source_path)
+            self.data_source = data_source_cls(args)
 
-        self.generate_rollout = load_function(self.args.rollout_function_path)
-        self.eval_generate_rollout = load_function(self.args.eval_function_path)
-        self.custom_reward_post_process_func = None
-        if self.args.custom_reward_post_process_path is not None:
-            self.custom_reward_post_process_func = load_function(self.args.custom_reward_post_process_path)
-        self.custom_convert_samples_to_train_data_func = None
-        if self.args.custom_convert_samples_to_train_data_path is not None:
-            self.custom_convert_samples_to_train_data_func = load_function(
-                self.args.custom_convert_samples_to_train_data_path
-            )
-        logger.info(f"import {self.args.rollout_function_path} as generate_rollout function.")
-        logger.info(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
+            self.generate_rollout = load_function(self.args.rollout_function_path)
+            self.eval_generate_rollout = load_function(self.args.eval_function_path)
+            self.custom_reward_post_process_func = None
+            if self.args.custom_reward_post_process_path is not None:
+                self.custom_reward_post_process_func = load_function(self.args.custom_reward_post_process_path)
+            self.custom_convert_samples_to_train_data_func = None
+            if self.args.custom_convert_samples_to_train_data_path is not None:
+                self.custom_convert_samples_to_train_data_func = load_function(
+                    self.args.custom_convert_samples_to_train_data_path
+                )
+            logger.info(f"import {self.args.rollout_function_path} as generate_rollout function.")
+            logger.info(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
-        if self.args.debug_train_only:
-            self.servers: dict[str, RolloutServer] = {}
-        else:
-            init_http_client(args)
-            self.servers = start_rollout_servers(args, pg)
+            if self.args.debug_train_only:
+                self.servers: dict[str, RolloutServer] = {}
+            else:
+                init_http_client(args)
+                self.servers = start_rollout_servers(args, pg)
 
-        init_tracking(args, primary=False)
-        self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0).remote()
-        self.rollout_id = -1
+            init_tracking(args, primary=False)
+            self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0).remote()
+            self.rollout_id = -1
 
-        self._health_monitors = []
-        if not self.args.debug_train_only and self.args.use_fault_tolerance:
-            for srv in self.servers.values():
-                for group in srv.server_groups:
-                    monitor = RolloutHealthMonitor(group, args)
-                    monitor.start()
-                    self._health_monitors.append(monitor)
-            self._ci_fault_injection_pending = self.args.ci_test  # Flag for CI fault injection
+            self._health_monitors = []
+            if not self.args.debug_train_only and self.args.use_fault_tolerance:
+                for srv in self.servers.values():
+                    for group in srv.server_groups:
+                        monitor = RolloutHealthMonitor(group, args)
+                        monitor.start()
+                        self._health_monitors.append(monitor)
+                self._ci_fault_injection_pending = self.args.ci_test  # Flag for CI fault injection
+
+            _step('init complete')
+        except BaseException as _exc:
+            import traceback as _tb
+            with open('/tmp/kejiechen/rm_init_exc.log', 'a') as _ef:
+                _ef.write(f'pid={_os.getpid()}\n')
+                _tb.print_exc(file=_ef)
+            raise
 
     def _get_metrics_router_addr(self) -> str | None:
         """Return the router address for scraping SGLang engine metrics.

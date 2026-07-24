@@ -125,10 +125,13 @@ class ReloadableProcessGroup(torch.distributed.ProcessGroup):
     GROUPS = {}
 
     def __init__(self, group, ranks):
-        super().__init__(
-            rank=dist.get_rank(group),
-            size=dist.get_world_size(group),
-        )
+        # torch 2.5.1 pybind11 ProcessGroup only accepts positional
+        # (rank, size) (or the 4-arg Store variant); slime originally
+        # used rank=/size= kwargs which is a newer API. Call the C++
+        # ctor with positional dummies (rank=0, size=0); __getattr__
+        # below delegates rank()/size()/allreduce/etc. to the inner
+        # self.group, so the base values are never observed.
+        super().__init__(0, 0)
         self.group = group
         self.group_info = {
             "ranks": ranks,

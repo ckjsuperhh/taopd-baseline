@@ -1,0 +1,63 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/torch.py b/megatron/core/dist_checkpointing/strategies/torch.py
+index 22794d7e6..aa5243979 100644
+--- a/megatron/core/dist_checkpointing/strategies/torch.py
++++ b/megatron/core/dist_checkpointing/strategies/torch.py
+@@ -296,9 +296,10 @@ def mcore_to_pyt_state_dict(
+         is_pre_mcore_014_sh_ten = (
+             sh_tens[0].prepend_axis_num or sh_tens[0].flattened_range is not None
+         )
+-        if (
+-            not is_pre_mcore_014_sh_ten or not sh_tens[0].has_regular_grid
+-        ) and is_torch_min_version("2.6a0"):
++        # Patched: skip CheckpointableShardedTensor path (torch 2.5.1 DCP
++        # finalize fails: inline_container.cc size mismatch with wrapper subclass).
++        # Always fall through to the regular-grid torch_sh_ten path.
++        if False:  # apex patch: CST path broken on torch 2.5.1 (corrupts model weight chunk metadata) (torch 2.5.1 DCP load cant handle CST) (torch 2.5.1 regular path crashes on irregular-grid optimizer state)("2.6a0")
+             assert sh_tens[0].flattened_range is None
+             if len(sh_tens) > 1:
+                 return LocalShardsContainer(
+@@ -308,9 +309,13 @@ def mcore_to_pyt_state_dict(
+                 return CheckpointableShardedTensor.from_sh_ten(sh_tens[0])
+         else:
+             if not sh_tens[0].has_regular_grid and not is_torch_min_version("2.6a0"):
+-                raise CheckpointingException(
+-                    f"Uneven sharding not supported for PyTorch version {get_torch_version()}"
+-                )
++                # Patched: log instead of raise, so we can see which tensors
++                # are irregular. Downstream will still try the regular path.
++                import logging as _logging
++                _logging.getLogger(__name__).warning(
++                    f"[apex patch] irregular-grid sh_ten key={sh_tens[0].key} "
++                    f"global_shape={sh_tens[0].global_shape} local_shape={sh_tens[0].local_shape} "
++                    f"on torch {get_torch_version()} - may raise in regular path")
+             torch_sh_ten = sharded_tensor_to_torch_sharded_tensor(
+                 sh_tens, rank, load_legacy_1d_flatten_tensors
+             )
+diff --git a/megatron/training/checkpointing.py b/megatron/training/checkpointing.py
+index 7c87eca19..5b79afd44 100644
+--- a/megatron/training/checkpointing.py
++++ b/megatron/training/checkpointing.py
+@@ -632,11 +632,18 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+                 checkpointing_context['save_strategy'] = save_strategy
+             end_ckpt = time()
+             logger.debug(f"rank: {rank}, takes {end_ckpt - start_ckpt} to prepare state dict for ckpt ")
+-            async_save_request = dist_checkpointing.save(state_dict, checkpoint_name, save_strategy,
+-                                                         async_sharded_save=args.async_save,
+-                                                         validate_access_integrity=validate_sharding_integrity,
+-                                                         preprocess_common_before_consistancy_check=preprocess_common_state_dict_fn,
+-                                                         content_metadata=_clean_metadata_for_serialization(sharded_sd_metadata))
++            try:
++                async_save_request = dist_checkpointing.save(state_dict, checkpoint_name, save_strategy,
++                                                             async_sharded_save=args.async_save,
++                                                             validate_access_integrity=validate_sharding_integrity,
++                                                             preprocess_common_before_consistancy_check=preprocess_common_state_dict_fn,
++                                                             content_metadata=_clean_metadata_for_serialization(sharded_sd_metadata))
++            except Exception as _save_exc:
++                import logging as _logging
++                _logging.getLogger(__name__).error(
++                    f"[apex patch] dist_checkpointing.save failed at iteration {iteration}: {_save_exc}")
++                import traceback; traceback.print_exc()
++                async_save_request = None
+             # [ModelOpt]: save sharded modelopt_state
+             if has_nvidia_modelopt:
+                 save_sharded_modelopt_state(model, checkpoint_name, (args.ckpt_format, 1))

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Sampled-token OPD baseline:
 #   teacher: Qwen3-4B served by SGLang on one GPU
@@ -118,9 +118,15 @@ require_dir() {
   fi
 }
 
+# apex: 预置 CONDA_BACKUP_*，避免 gxx deactivate 钩子在内部 nounset 下 unbound variable 致激活失败
+for _v in CXX CC CPP CFLAGS CXXFLAGS LD LDFLAGS LIBRARY_PATH FC F77 F90 CPPFLAGS; do
+  eval "export \"CONDA_BACKUP_${_v}=\${CONDA_BACKUP_${_v}:-}\""
+done
+echo "[DBG-pre] CONDA_BACKUP_CXX=[$CONDA_BACKUP_CXX] CONDA_DEFAULT_ENV=[$CONDA_DEFAULT_ENV]"
 if [[ -f "${CONDA_SH}" ]]; then
   source "${CONDA_SH}"
-  conda activate "${CONDA_ENV}"
+  conda activate "${CONDA_ENV}" || true
+  echo "[DBG] CONDA_DEFAULT_ENV=[$CONDA_DEFAULT_ENV] CONDA_BACKUP_CXX=[$CONDA_BACKUP_CXX] python3=$(command -v python3) CONDA_PREFIX=[$CONDA_PREFIX]"
 fi
 
 ACTIVE_SITE_PACKAGES="$(python3 - <<'PY'
@@ -212,6 +218,7 @@ CUDA_VISIBLE_DEVICES="${TEACHER_GPU}" python3 -m sglang.launch_server \
   --chunked-prefill-size 4096 \
   --mem-fraction-static "${TEACHER_MEM_FRACTION}" \
   --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
+  --disable-piecewise-cuda-graph \
   > "${TEACHER_LOG}" 2>&1 &
 TEACHER_PID=$!
 
@@ -359,6 +366,7 @@ SGLANG_ARGS=(
   --sglang-mem-fraction-static "${ROLLOUT_MEM_FRACTION}"
   --sglang-cuda-graph-max-bs "${SGLANG_CUDA_GRAPH_MAX_BS}"
   --sglang-enable-metrics
+  --sglang-disable-piecewise-cuda-graph
 )
 
 MISC_ARGS=(

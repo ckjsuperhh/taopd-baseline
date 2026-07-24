@@ -11,10 +11,11 @@ echo "========================================="
 # ── 1. Conda env ─────────────────────────────────────────────────────────
 echo "[1/6] Conda env '${CONDA_ENV}' (Python 3.10)..."
 if conda env list | grep -qw "${CONDA_ENV}"; then
-  echo "  Removing existing..."
-  conda env remove -n "${CONDA_ENV}" -y
+  echo "  ✅ env '${CONDA_ENV}' 已存在，跳过创建 (若要重建: conda env remove -n ${CONDA_ENV})"
+else
+  echo "  创建 env '${CONDA_ENV}'..."
+  conda create -n "${CONDA_ENV}" python=3.10 pip -y
 fi
-conda create -n "${CONDA_ENV}" python=3.10 pip -y
 activate_env
 
 ENV_PREFIX="$(python3 -c 'import sys; print(sys.prefix)')"
@@ -54,38 +55,13 @@ assert torch.cuda.is_available(), 'CUDA not available'
 
 # ── 4. SGLang + flash-attn + 其他依赖 ──────────────────────────────────
 echo "[4/6] pip install sglang + flash-attn + deps..."
-# sglang[all]==0.4.1 在 2026 年可能因 flashinfer==0.1.6 被 yank 而装不上。
-# 策略: [all] → 失败则 bare sglang + 单独装 sgl-kernel (rollout 必需) → 再失败报错。
+# 已知可行的组合: sglang==0.4.1 + sgl-kernel (从 flashinfer.ai wheel 索引拉最新)
+# sglang[all]==0.4.1 在 2026 年会因 flashinfer==0.1.6 yanked 失败，所以直接走 bare + sgl-kernel。
 FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
 
-if pip install "sglang[all]==0.4.1"; then
-  echo "  sglang[all]==0.4.1 装好了"
-else
-  echo "  ⚠ sglang[all] 失败 (flashinfer==0.1.6 可能已 yank)，回退到 bare + 单独装 sgl-kernel..."
-  pip install "sglang==0.4.1" || { echo "  ❌ sglang install failed"; false; }
-  # sgl-kernel 是 rollout SGLang 引擎必需的 CUDA ops
-  # 版本号可能和 sglang 不完全对齐 (0.4.1 在 PyPI 上可能不存在)，逐一试
-  SGL_KERNEL_OK=0
-  for KV in "0.4.1" "0.4.2" "0.4.3" ""; do
-    if [[ -z "${KV}" ]]; then
-      SPEC="sgl-kernel"
-    else
-      SPEC="sgl-kernel==${KV}"
-    fi
-    echo "  Trying: ${SPEC}..."
-    if pip install "${SPEC}" --extra-index-url "${FLASHINFER_INDEX}"; then
-      SGL_KERNEL_OK=1; break
-    fi
-    if pip install "${SPEC}"; then
-      SGL_KERNEL_OK=1; break
-    fi
-  done
-  if [[ "${SGL_KERNEL_OK}" -eq 0 ]]; then
-    echo "  ❌ sgl-kernel 装不上 (PyPI + flashinfer.ai 都试了)"
-    echo "     Rollout 引擎将不可用。可稍后手动:"
-    echo "       pip install sgl-kernel --extra-index-url ${FLASHINFER_INDEX}"
-  fi
-fi
+pip install "sglang==0.4.1" || { echo "  ❌ sglang install failed"; false; }
+pip install sgl-kernel --extra-index-url "${FLASHINFER_INDEX}" \
+  || { echo "  ❌ sgl-kernel 装不上 (rollout 引擎必需)"; false; }
 
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \

@@ -30,32 +30,10 @@ except Exception as e:
 "
 echo ""
 
-echo "=== 尝试多版本 sgl-kernel ==="
-# 逐版本试 PyPI 与 flashinfer.ai 两个索引
-OK=0
-for KV in "0.4.1" "0.4.2" "0.4.3" ""; do
-  if [[ -z "${KV}" ]]; then
-    SPEC="sgl-kernel"
-  else
-    SPEC="sgl-kernel==${KV}"
-  fi
-  echo "--- ${SPEC} via flashinfer.ai ---"
-  if pip install "${SPEC}" --extra-index-url "${FLASHINFER_INDEX}"; then
-    OK=1; break
-  fi
-  echo "--- ${SPEC} via PyPI ---"
-  if pip install "${SPEC}"; then
-    OK=1; break
-  fi
-done
-
-echo ""
-if [[ "${OK}" -eq 1 ]]; then
-  echo "✅ sgl-kernel 装好"
-else
-  echo "❌ sgl-kernel 装不上 (PyPI + flashinfer.ai 都试了)"
-  echo "   可试源码编译: pip install sgl-kernel --no-binary :all:"
-fi
+echo "=== 安装 sgl-kernel (via flashinfer.ai) ==="
+pip install sgl-kernel --extra-index-url "${FLASHINFER_INDEX}" \
+  || { echo "❌ sgl-kernel 装不上"; exit 1; }
+echo "✅ sgl-kernel 装好"
 
 echo ""
 echo "=== 最终状态 ==="

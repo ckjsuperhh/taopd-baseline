@@ -30,7 +30,8 @@ conda install -c conda-forge -y \
   cudnn \
   nccl \
   curl \
-  gdb
+  gdb \
+  tmux
 
 # 验证 nvcc
 export CUDA_HOME="${ENV_PREFIX}"

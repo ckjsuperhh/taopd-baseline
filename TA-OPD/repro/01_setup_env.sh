@@ -54,13 +54,20 @@ assert torch.cuda.is_available(), 'CUDA not available'
 
 # ── 4. SGLang + flash-attn + 其他依赖 ──────────────────────────────────
 echo "[4/6] pip install sglang + flash-attn + deps..."
-pip install "sglang[all]>=0.4.0" || pip install sglang
+# Pin sglang to a version known to work with torch 2.5.1+cu124.
+# Try the wheel with [all] extras first (includes sgl-kernel, CUDA ops).
+# If [all] fails (compile/network), try the bare wheel, then diagnose.
+pip install "sglang[all]==0.4.1" \
+  || pip install "sglang==0.4.1" \
+  || { echo "  ❌ sglang install failed (network/compile)"; false; }
+
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
   --force-reinstall --no-deps
 
-MAX_JOBS=4 pip install flash-attn --no-build-isolation
+# flash-attn 编译非常慢且容易失败；允许失败（训练时如果不用 flash-attn，Megatron 会 fallback）
+MAX_JOBS=4 pip install flash-attn --no-build-isolation || echo "  ⚠ flash-attn failed (non-fatal; Megatron can fall back)"
 
 pip install "ray[default]>=2.9"
 pip install transformers datasets accelerate safetensors
@@ -80,14 +87,25 @@ fi
 
 # ── 5. Megatron-LM + DCP patch ──────────────────────────────────────────
 echo "[5/6] Megatron-LM..."
-if [[ ! -d "${MEGATRON_LM_DIR}" ]]; then
-  git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_LM_DIR}"
+if [[ ! -d "${MEGATRON_LM_DIR}/megatron" ]]; then
+  echo "  Cloning Megatron-LM to ${MEGATRON_LM_DIR}..."
+  rm -rf "${MEGATRON_LM_DIR}"
+  git clone --depth 1 https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_LM_DIR}" \
+    || { echo "  ❌ Megatron-LM clone failed (GitHub 不可达?)"; false; }
 fi
+if [[ ! -d "${MEGATRON_LM_DIR}/megatron" ]]; then
+  echo "  ❌ ${MEGATRON_LM_DIR}/megatron 不存在，clone 失败"
+  false
+fi
+echo "  Megatron-LM at ${MEGATRON_LM_DIR}"
+
 cd "${MEGATRON_LM_DIR}"
 PATCH="${REPO_ROOT}/docs/megatron_apex_patches.patch"
 if [[ -f "${PATCH}" ]] && git apply --check "${PATCH}" 2>/dev/null; then
   git apply "${PATCH}"
   echo "  Applied DCP patches"
+else
+  echo "  (no patch to apply or already applied)"
 fi
 cd "${PROJECT_ROOT}"
 
@@ -145,6 +163,9 @@ export PATH="${HOME}/.local/bin:${PATH}"
 # ── 验证 ─────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Verification ==="
+# 验证时必须把 Megatron-LM 和 slime_ta_opd 加入 PYTHONPATH，否则 import megatron 会失败
+export PYTHONPATH="${MEGATRON_LM_DIR}:${SLIME_DIR}:${PYTHONPATH:-}"
+echo "  PYTHONPATH=${PYTHONPATH}"
 python3 -c "
 import torch
 v = torch.__version__
@@ -152,16 +173,42 @@ ok = '✅' if v.startswith('2.5.') else '❌'
 print(f'  {ok} torch {v} cuda={torch.version.cuda} GPUs={torch.cuda.device_count()}')
 try:
     import flash_attn; print(f'  ✅ flash_attn {flash_attn.__version__}')
-except: print('  ❌ flash_attn')
+except Exception as e: print(f'  ❌ flash_attn ({e})')
 try:
-    import sglang; print(f'  ✅ sglang {sglang.__version__}')
-except: print('  ❌ sglang')
+    import sglang
+    # 用 pip show 取版本最可靠（sglang 本体不一定暴露 __version__）
+    import subprocess as _sp
+    _r = _sp.run(['pip', 'show', 'sglang'], capture_output=True, text=True)
+    _sv = 'unknown'
+    for _line in (_r.stdout or '').splitlines():
+        if _line.startswith('Version:'):
+            _sv = _line.split(':', 1)[1].strip(); break
+    # 检查 sgl-kernel 是否在（[all] extras 的核心）
+    _has_kernel = False
+    try:
+        import sgl_kernel; _has_kernel = True
+    except Exception:
+        pass
+    _mark = '✅' if _has_kernel else '⚠'
+    print(f'  {_mark} sglang {_sv} (sgl_kernel={"ok" if _has_kernel else "MISSING — 回退到 bare sglang，rollout 可能不可用"})')
+except Exception as e:
+    print(f'  ❌ sglang ({e})')
 try:
     import ray; print(f'  ✅ ray {ray.__version__}')
-except: print('  ❌ ray')
-import transformers; print(f'  ✅ transformers {transformers.__version__}')
-import pyarrow; print(f'  ✅ pyarrow {pyarrow.__version__}')
-import megatron; print(f'  ✅ megatron')
+except Exception as e: print(f'  ❌ ray ({e})')
+try:
+    import transformers; print(f'  ✅ transformers {transformers.__version__}')
+except Exception as e: print(f'  ❌ transformers ({e})')
+try:
+    import pyarrow; print(f'  ✅ pyarrow {pyarrow.__version__}')
+except Exception as e: print(f'  ❌ pyarrow ({e})')
+try:
+    import megatron
+    import os
+    mp = os.path.dirname(megatron.__file__)
+    print(f'  ✅ megatron ({mp})')
+except Exception as e:
+    print(f'  ❌ megatron ({e})')
 "
 echo ""
 echo "========================================="

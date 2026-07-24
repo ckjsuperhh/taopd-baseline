@@ -75,7 +75,7 @@ MAX_JOBS=4 pip install flash-attn --no-build-isolation || echo "  ⚠ flash-attn
 
 pip install "ray[default]>=2.9"
 pip install transformers datasets accelerate safetensors
-pip install pyarrow pandas numpy scipy scikit-learn
+pip install pyarrow pandas "numpy<2" scipy scikit-learn
 pip install matplotlib seaborn
 pip install einops tiktoken sentencepiece protobuf
 pip install wandb tensorboard

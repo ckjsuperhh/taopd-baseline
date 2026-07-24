@@ -54,12 +54,38 @@ assert torch.cuda.is_available(), 'CUDA not available'
 
 # ── 4. SGLang + flash-attn + 其他依赖 ──────────────────────────────────
 echo "[4/6] pip install sglang + flash-attn + deps..."
-# Pin sglang to a version known to work with torch 2.5.1+cu124.
-# Try the wheel with [all] extras first (includes sgl-kernel, CUDA ops).
-# If [all] fails (compile/network), try the bare wheel, then diagnose.
-pip install "sglang[all]==0.4.1" \
-  || pip install "sglang==0.4.1" \
-  || { echo "  ❌ sglang install failed (network/compile)"; false; }
+# sglang[all]==0.4.1 在 2026 年可能因 flashinfer==0.1.6 被 yank 而装不上。
+# 策略: [all] → 失败则 bare sglang + 单独装 sgl-kernel (rollout 必需) → 再失败报错。
+FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
+
+if pip install "sglang[all]==0.4.1"; then
+  echo "  sglang[all]==0.4.1 装好了"
+else
+  echo "  ⚠ sglang[all] 失败 (flashinfer==0.1.6 可能已 yank)，回退到 bare + 单独装 sgl-kernel..."
+  pip install "sglang==0.4.1" || { echo "  ❌ sglang install failed"; false; }
+  # sgl-kernel 是 rollout SGLang 引擎必需的 CUDA ops
+  # 版本号可能和 sglang 不完全对齐 (0.4.1 在 PyPI 上可能不存在)，逐一试
+  SGL_KERNEL_OK=0
+  for KV in "0.4.1" "0.4.2" "0.4.3" ""; do
+    if [[ -z "${KV}" ]]; then
+      SPEC="sgl-kernel"
+    else
+      SPEC="sgl-kernel==${KV}"
+    fi
+    echo "  Trying: ${SPEC}..."
+    if pip install "${SPEC}" --extra-index-url "${FLASHINFER_INDEX}"; then
+      SGL_KERNEL_OK=1; break
+    fi
+    if pip install "${SPEC}"; then
+      SGL_KERNEL_OK=1; break
+    fi
+  done
+  if [[ "${SGL_KERNEL_OK}" -eq 0 ]]; then
+    echo "  ❌ sgl-kernel 装不上 (PyPI + flashinfer.ai 都试了)"
+    echo "     Rollout 引擎将不可用。可稍后手动:"
+    echo "       pip install sgl-kernel --extra-index-url ${FLASHINFER_INDEX}"
+  fi
+fi
 
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
@@ -189,8 +215,13 @@ try:
         import sgl_kernel; _has_kernel = True
     except Exception:
         pass
-    _mark = '✅' if _has_kernel else '⚠'
-    print(f'  {_mark} sglang {_sv} (sgl_kernel={"ok" if _has_kernel else "MISSING — 回退到 bare sglang，rollout 可能不可用"})')
+    _mark = chr(9989) if _has_kernel else chr(9888)
+    _kernel_msg = 'ok' if _has_kernel else 'MISSING'
+    print(f'  {_mark} sglang {_sv} (sgl_kernel={_kernel_msg})')
+    if not _has_kernel:
+        print('    ⚠ sgl_kernel 缺失: rollout 不可用。')
+        print('    原因: pip install sglang[all]==0.4.1 因 flashinfer==0.1.6 (yanked) 失败。')
+        print('    建议单独装: pip install sgl-kernel==0.4.1 --find-links https://flashinfer.ai/whl/cu124/torch2.5/')
 except Exception as e:
     print(f'  ❌ sglang ({e})')
 try:

@@ -3,7 +3,7 @@
 # Source this file at the top of every repro script:
 #   source "$(dirname "${BASH_SOURCE[0]}")/00_env.sh"
 
-set -euo pipefail
+set -eo pipefail  # 不能用 -u：conda 内部 deactivate 脚本有 unbound variable
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 PROJECT_ROOT="${PROJECT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd_baseline}"

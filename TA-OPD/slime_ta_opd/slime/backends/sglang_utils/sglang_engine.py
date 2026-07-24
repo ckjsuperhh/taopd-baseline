@@ -535,6 +535,8 @@ def _compute_server_args(
         "ep_size": args.sglang_ep_size,
         # always skip warmup to prevent warmup timeout.
         "skip_server_warmup": True,
+        # disable piecewise CUDA graphs for torch 2.5.1 compatibility
+        "disable_piecewise_cuda_graph": True,
         # always enable draft weights cpu backup so that we run training without mtp weights.
         "enable_draft_weights_cpu_backup": True,
         # Always enable Prometheus metrics so the /engine_metrics endpoint is
@@ -607,6 +609,7 @@ _EXTERNAL_ENGINE_SKIP_CHECK_FIELDS = [
     "nccl_port",
     "dist_init_addr",
     "skip_server_warmup",
+    "disable_piecewise_cuda_graph",
     "enable_draft_weights_cpu_backup",
     "enable_metrics",
     "mem_fraction_static",

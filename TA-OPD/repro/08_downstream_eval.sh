@@ -8,6 +8,10 @@ echo "========================================="
 echo " Step 8: Downstream evaluation"
 echo "========================================="
 
+TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
+CONDA_LIB="$(get_conda_lib)"
+export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+
 DOWNSTREAM_ROOT="${OUTPUT_ROOT}/downstream"
 mkdir -p "${DOWNSTREAM_ROOT}"
 

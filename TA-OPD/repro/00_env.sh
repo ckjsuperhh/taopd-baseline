@@ -32,22 +32,23 @@ CONDA_SH="${CONDA_SH:-$(conda info --base 2>/dev/null || echo "${HOME}/miniconda
 # ── HuggingFace mirror (China mainland) ────────────────────────────────────
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
-# ── GPU layout (8× RTX 4090 48 GB) ────────────────────────────────────────
-# 2 lanes × 3 GPUs each = 6 GPUs used; 2 GPUs spare
-#   Lane A: Teacher GPU0, Student GPU1,2 (dp=2, colocate)
-#   Lane B: Teacher GPU3, Student GPU4,5 (dp=2, colocate)
+# ── GPU layout (8× RTX 4090 48 GB, non-colocate) ──────────────────────────
+# 2 lanes × 4 GPUs each = 8 GPUs total
+#   Lane A: Teacher GPU0, Actor GPU1,2 (dp=2), Rollout GPU3
+#   Lane B: Teacher GPU4, Actor GPU5,6 (dp=2), Rollout GPU7
+# Non-colocate: rollout engine has its own GPU (no sharing with actor)
 
 LANE_A_TEACHER_GPU=0
-LANE_A_STUDENT_GPUS="1,2"
+LANE_A_STUDENT_GPUS="1,2,3"
 LANE_A_EVAL_GPUS="0,1"
 
-LANE_B_TEACHER_GPU=3
-LANE_B_STUDENT_GPUS="4,5"
-LANE_B_EVAL_GPUS="3,4"
+LANE_B_TEACHER_GPU=4
+LANE_B_STUDENT_GPUS="5,6,7"
+LANE_B_EVAL_GPUS="4,5"
 
 ACTOR_NUM_GPUS_PER_NODE=2
 ROLLOUT_NUM_GPUS=1
-COLOCATE=1
+NUM_GPUS_PER_NODE=3
 
 # ── Port bases (per-lane offset) ──────────────────────────────────────────
 LANE_A_PORT_BASE=0
@@ -97,14 +98,15 @@ OPD_TOKEN_BANK_FORMAT=csv
 
 # ── SGLang settings ──────────────────────────────────────────────────────
 TEACHER_MEM_FRACTION=0.55
-TEACHER_CUDA_GRAPH_MAX_BS=8
-ROLLOUT_MEM_FRACTION=0.45
+TEACHER_CUDA_GRAPH_MAX_BS=4
+ROLLOUT_MEM_FRACTION=0.80
 SGLANG_CUDA_GRAPH_MAX_BS=8
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # Diagnostic uses smaller batch → lower mem fractions
 DIAG_TEACHER_MEM_FRACTION=0.54
 DIAG_TEACHER_CUDA_GRAPH_MAX_BS=2
-DIAG_ROLLOUT_MEM_FRACTION=0.22
+DIAG_ROLLOUT_MEM_FRACTION=0.60
 DIAG_SGLANG_CUDA_GRAPH_MAX_BS=2
 
 # ── Seeds ─────────────────────────────────────────────────────────────────
@@ -178,6 +180,10 @@ get_pythonpath() {
 
 get_torch_cuda_lib() {
   python3 -c 'from pathlib import Path; import torch; sp = Path(torch.__file__).resolve().parents[1]; print(sp / "nvidia" / "cuda_runtime" / "lib")'
+}
+
+get_conda_lib() {
+  python3 -c 'import sys; print(sys.prefix + "/lib")'
 }
 
 log() {

@@ -10,7 +10,8 @@ echo "========================================="
 
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
-export LD_LIBRARY_PATH="${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+CONDA_LIB="$(get_conda_lib)"
+export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
 export PYTHONBUFFERED=16
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_CUMEM_ENABLE=0
@@ -48,7 +49,7 @@ run_diagnostic() {
     return 0
   fi
 
-  local teacher_gpu=0 student_gpus="1,2" eval_gpus="0,1"
+  local teacher_gpu=0 student_gpus="1,2,3" eval_gpus="0,1"
   compute_ports 0 200
   local teacher_pid=""
 
@@ -62,6 +63,7 @@ run_diagnostic() {
 
   echo "─── Diagnostic: ${name} (seed=${diag_seed}) ───"
 
+  ulimit -n 100000 2>/dev/null || true
   ray stop --force 2>/dev/null || true
 
   echo "  Starting teacher..."
@@ -70,6 +72,7 @@ run_diagnostic() {
     --nccl-port "${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
+    --disable-piecewise-cuda-graph \
     > "${diag_log}.teacher" 2>&1 &
   teacher_pid=$!
 
@@ -81,9 +84,9 @@ run_diagnostic() {
     sleep 5
   done
 
-  echo "  Starting Ray..."
+  echo "  Starting Ray (3 GPUs)..."
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray start --head \
-    --node-ip-address 127.0.0.1 --port="${RAY_PORT}" --num-gpus 2 \
+    --node-ip-address 127.0.0.1 --port="${RAY_PORT}" --num-gpus 3 \
     --disable-usage-stats --dashboard-host=0.0.0.0 \
     --dashboard-port="${RAY_DASHBOARD_PORT}" \
     --object-manager-port="${RAY_OBJECT_PORT}" --node-manager-port="${RAY_NODE_PORT}" \
@@ -98,10 +101,10 @@ run_diagnostic() {
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${RAY_DASHBOARD_PORT}" \
     --submission-id "${job_id}" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node 2 --rollout-num-gpus 1 \
-    --num-gpus-per-node 2 --colocate \
+    --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
     --seed "${diag_seed}" \
     "${MODEL_ARGS[@]}" \
     --hf-checkpoint "${STUDENT_HF}" --ref-load "${STUDENT_TORCH_DIST}" \

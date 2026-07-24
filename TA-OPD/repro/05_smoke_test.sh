@@ -10,7 +10,8 @@ echo "========================================="
 
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
-export LD_LIBRARY_PATH="${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+CONDA_LIB="$(get_conda_lib)"
+export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
 export PYTHONBUFFERED=16
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_CUMEM_ENABLE=0
@@ -27,7 +28,7 @@ source "${SLIME_DIR}/scripts/models/qwen3-1.7B.sh"
 run_smoke() {
   local name=$1 mask=$2 ratio=$3
   local save_dir="${SMOKE_OUTPUT}/${name}"
-  local teacher_gpu=0 student_gpus="1,2"
+  local teacher_gpu=0 student_gpus="1,2,3"
   local teacher_port=13141 nccl_port=23141
   local ray_port=26379 dash_port=8265
   local teacher_pid=""
@@ -47,6 +48,7 @@ run_smoke() {
   }
   trap cleanup_smoke EXIT
 
+  ulimit -n 100000 2>/dev/null || true
   ray stop --force 2>/dev/null || true
 
   mkdir -p "${save_dir}" "${LOG_DIR}"
@@ -55,7 +57,8 @@ run_smoke() {
   CUDA_VISIBLE_DEVICES="${teacher_gpu}" python3 -m sglang.launch_server \
     --model-path "${TEACHER_MODEL}" --host 0.0.0.0 --port "${teacher_port}" \
     --nccl-port "${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
-    --mem-fraction-static 0.55 --cuda-graph-max-bs 8 \
+    --mem-fraction-static "${TEACHER_MEM_FRACTION}" --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
+    --disable-piecewise-cuda-graph \
     > "${LOG_DIR}/${name}_teacher.log" 2>&1 &
   teacher_pid=$!
 
@@ -70,9 +73,9 @@ run_smoke() {
   done
   echo "  Teacher ready."
 
-  echo "  Starting Ray cluster..."
+  echo "  Starting Ray cluster (3 GPUs: 2 actor + 1 rollout)..."
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray start --head \
-    --node-ip-address 127.0.0.1 --port="${ray_port}" --num-gpus 2 \
+    --node-ip-address 127.0.0.1 --port="${ray_port}" --num-gpus 3 \
     --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port="${dash_port}" \
     --object-manager-port=28076 --node-manager-port=28077 \
     --dashboard-agent-listen-port=28078 --dashboard-agent-grpc-port=28079 \
@@ -97,14 +100,14 @@ run_smoke() {
     )
   fi
 
-  echo "  Submitting training job..."
+  echo "  Submitting training job (non-colocate: actor=2GPU, rollout=1GPU)..."
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${dash_port}" \
     --submission-id "${job_id}" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node 2 --rollout-num-gpus 1 \
-    --num-gpus-per-node 2 --colocate \
+    --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
     --seed 1234 \
     "${MODEL_ARGS[@]}" \
     --hf-checkpoint "${STUDENT_HF}" --ref-load "${STUDENT_TORCH_DIST}" \
@@ -125,8 +128,8 @@ run_smoke() {
     --context-parallel-size 1 --expert-model-parallel-size 1 --expert-tensor-parallel-size 1 \
     --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 \
     --micro-batch-size 1 \
-    --rollout-num-gpus-per-engine 1 --sglang-mem-fraction-static 0.45 \
-    --sglang-cuda-graph-max-bs 8 --sglang-enable-metrics \
+    --rollout-num-gpus-per-engine 1 --sglang-mem-fraction-static "${ROLLOUT_MEM_FRACTION}" \
+    --sglang-cuda-graph-max-bs "${SGLANG_CUDA_GRAPH_MAX_BS}" --sglang-enable-metrics \
     --attention-dropout 0.0 --hidden-dropout 0.0 \
     --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
     --attention-backend flash --no-rope-fusion --transformer-impl local \

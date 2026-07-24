@@ -11,7 +11,8 @@ echo "========================================="
 
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
-export LD_LIBRARY_PATH="${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+CONDA_LIB="$(get_conda_lib)"
+export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
 export PYTHONBUFFERED=16
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_CUMEM_ENABLE=0
@@ -52,6 +53,7 @@ init_context_bank() {
     trap - EXIT
   }
 
+  ulimit -n 100000 2>/dev/null || true
   ray stop --force 2>/dev/null || true
 
   echo "  Starting teacher..."
@@ -60,6 +62,7 @@ init_context_bank() {
     --nccl-port "${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
+    --disable-piecewise-cuda-graph \
     > "${init_log}.teacher" 2>&1 &
   teacher_pid=$!
 
@@ -74,7 +77,7 @@ init_context_bank() {
 
   echo "  Starting Ray..."
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray start --head \
-    --node-ip-address 127.0.0.1 --port="${RAY_PORT}" --num-gpus 2 \
+    --node-ip-address 127.0.0.1 --port="${RAY_PORT}" --num-gpus 3 \
     --disable-usage-stats --dashboard-host=0.0.0.0 \
     --dashboard-port="${RAY_DASHBOARD_PORT}" \
     --object-manager-port="${RAY_OBJECT_PORT}" --node-manager-port="${RAY_NODE_PORT}" \
@@ -87,10 +90,10 @@ init_context_bank() {
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${RAY_DASHBOARD_PORT}" \
     --submission-id "init_context_bank" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node 2 --rollout-num-gpus 1 \
-    --num-gpus-per-node 2 --colocate \
+    --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
     --seed "${DIAG_HELDOUT_SEED}" \
     "${MODEL_ARGS[@]}" \
     --hf-checkpoint "${STUDENT_HF}" --ref-load "${STUDENT_TORCH_DIST}" \
@@ -196,6 +199,7 @@ run_single() {
     trap - EXIT
   }
 
+  ulimit -n 100000 2>/dev/null || true
   pkill -f "/tmp/slime_ray_${RAY_PORT}" 2>/dev/null || true
   pkill -f "sglang.launch_server.*--port ${TEACHER_PORT}" 2>/dev/null || true
 
@@ -205,6 +209,7 @@ run_single() {
     --nccl-port "${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
+    --disable-piecewise-cuda-graph \
     > "${train_log}.teacher" 2>&1 &
   teacher_pid=$!
 
@@ -247,11 +252,11 @@ run_single() {
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${RAY_DASHBOARD_PORT}" \
     --submission-id "${job_id}" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node "${ACTOR_NUM_GPUS_PER_NODE}" \
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}" \
-    --num-gpus-per-node "${ray_gpu_count}" --colocate \
+    --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
     --seed "${seed}" \
     "${MODEL_ARGS[@]}" \
     --hf-checkpoint "${STUDENT_HF}" --ref-load "${STUDENT_TORCH_DIST}" \
@@ -358,9 +363,9 @@ TOTAL=$((${#ALL_RUNS[@]} * ${#SEEDS[@]}))
 DONE=0; FAILED=0; idx=0
 
 echo ""
-echo "[Phase 1] Starting main sweep: ${TOTAL} runs, 2 lanes"
-echo "  Lane A: Teacher GPU${LANE_A_TEACHER_GPU}, Student GPU ${LANE_A_STUDENT_GPUS}"
-echo "  Lane B: Teacher GPU${LANE_B_TEACHER_GPU}, Student GPU ${LANE_B_STUDENT_GPUS}"
+echo "[Phase 1] Starting main sweep: ${TOTAL} runs, 2 lanes (non-colocate)"
+echo "  Lane A: Teacher GPU${LANE_A_TEACHER_GPU}, Actor+Rollout GPU ${LANE_A_STUDENT_GPUS}"
+echo "  Lane B: Teacher GPU${LANE_B_TEACHER_GPU}, Actor+Rollout GPU ${LANE_B_STUDENT_GPUS}"
 echo ""
 
 # Run in pairs: Lane A gets even-indexed seeds, Lane B gets odd

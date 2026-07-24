@@ -16,7 +16,8 @@ fi
 
 export PYTHONPATH="${MEGATRON_LM_DIR}:${SLIME_DIR}:${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
-export LD_LIBRARY_PATH="${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+CONDA_LIB="$(get_conda_lib)"
+export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
 
 cd "${SLIME_DIR}"
 source "${SLIME_DIR}/scripts/models/qwen3-1.7B.sh"

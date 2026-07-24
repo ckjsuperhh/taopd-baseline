@@ -65,6 +65,11 @@ pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
   || pip install "sgl-kernel==0.1.0" \
   || { echo "  ❌ sgl-kernel==0.1.0 装不上 (rollout 引擎必需)"; false; }
 
+# bare sglang 不带 [all] extras 的运行时依赖 (teacher/rollout SGLang server 要用)
+pip install \
+  orjson fastapi uvicorn pydantic msgspec python-multipart \
+  hf_transfer decord soundfile pillow requests aiohttp psutil
+
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \

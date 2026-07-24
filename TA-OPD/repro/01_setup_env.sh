@@ -80,6 +80,7 @@ pip install matplotlib seaborn
 pip install einops tiktoken sentencepiece protobuf
 pip install wandb tensorboard
 pip install lm-eval>=0.4.5
+pip install mbridge
 
 # 最终检查 torch 没被升级
 CURRENT="$(python3 -c 'import torch; print(torch.__version__)')"

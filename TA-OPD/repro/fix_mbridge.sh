@@ -73,7 +73,10 @@ fi
 echo ""
 
 echo "=== [5] 验证 mbridge import ==="
+export PYTHONPATH="${MEGATRON_LM_DIR}:${SLIME_DIR}:${PYTHONPATH:-}"
 python3 -c "
+import sys, os
+# 仅验证 mbridge 包本身; 它内部依赖 megatron, 所以 PYTHONPATH 要包含 MEGATRON_LM_DIR
 try:
     from mbridge.core import register_model
     print('✅ from mbridge.core import register_model OK')

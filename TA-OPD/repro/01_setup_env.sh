@@ -67,7 +67,7 @@ pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
 
 # bare sglang 不带 [all] extras 的运行时依赖 (teacher/rollout SGLang server 要用)
 pip install \
-  orjson fastapi uvicorn pydantic msgspec python-multipart \
+  orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil
 
 # sglang 可能拉高 torch，回退

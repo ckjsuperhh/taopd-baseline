@@ -12,6 +12,7 @@ pip install \
   orjson \
   fastapi \
   uvicorn \
+  uvloop \
   pydantic \
   msgspec \
   python-multipart \

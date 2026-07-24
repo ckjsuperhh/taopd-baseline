@@ -123,7 +123,7 @@ seed = ${DIAG_HELDOUT_SEED}
 from datasets import load_dataset
 
 print("  Downloading GSM8K from HuggingFace...")
-ds = load_dataset("gsm8k", "main", split="test")
+ds = load_dataset("openai/gsm8k", "main", split="test")
 
 def make_cot_prompt(question):
     return (

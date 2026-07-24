@@ -73,6 +73,12 @@ pip install \
   pyzmq outlines prometheus_client setproctitle diskcache cloudpickle \
   tiktoken numba coloredlogs packaging sentencepiece protobuf nvidia-ml-py openai
 
+# vllm: sglang server 依赖。钉已知与 torch 2.5.1+cu124 兼容的版本, 装完回退 torch
+for V in "0.6.3.post1" "0.6.3" "0.6.2" "0.6.1.post2"; do
+  if pip install "vllm==${V}" 2>/dev/null; then break; fi
+done
+pip install vllm 2>/dev/null || echo "  ⚠ vllm 装不上 (sglang 可能 fallback 到自己的 backend)"
+
 # sglang 可能拉高 torch，回退
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \

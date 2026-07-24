@@ -86,11 +86,13 @@ pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --force-reinstall --no-deps
 
 # flashinfer: sglang 0.4.1 的 attention backend。默认 PyPI 的 0.1.6 已 yanked,
-# 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5)。允许失败 (sglang 可 fallback 到 triton)
-for V in "0.2.1.post1" "0.2.1" "0.2.0" "0.1.6"; do
-  if pip install "flashinfer==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null; then break; fi
+# 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5)。wheel 包名叫 flashinfer-python。
+# 允许失败 (sglang 可 fallback 到 triton)
+for V in "0.2.1.post2" "0.2.1.post1" "0.2.2.post1" "0.2.2" "0.2.0.post2" "0.2.3" "0.2.4" "0.2.5"; do
+  if pip install "flashinfer-python==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null; then break; fi
 done
-pip install flashinfer --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null \
+pip install flashinfer-python --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null \
+  || pip install flashinfer-python 2>/dev/null \
   || echo "  ⚠ flashinfer 装不上 (sglang 可能 fallback 到 triton, 不一定致命)"
 
 # flash-attn 编译非常慢且容易失败；允许失败（训练时如果不用 flash-attn，Megatron 会 fallback）

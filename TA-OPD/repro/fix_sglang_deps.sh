@@ -9,6 +9,10 @@ activate_env
 echo "=== 装 sglang[all] 通常会带上的常见依赖 ==="
 # sglang==0.4.1 bare 不带这些, 但 server / rollout 都要
 # 一次性补齐, 不再一个个打地鼠
+
+# pyairports (outlines 传递依赖) 单独 force 一次, 避免之前跑过旧版脚本漏掉
+pip install --force-reinstall --no-deps pyairports 2>/dev/null || pip install pyairports
+
 pip install \
   orjson \
   fastapi \
@@ -42,21 +46,28 @@ pip install \
 
 # flashinfer: sglang 0.4.1 的 attention backend。
 #   - 默认 PyPI 的 flashinfer==0.1.6 已被 yanked, 直接 pip install 会失败
-#   - 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5), 这里能拿到 0.1.6 / 0.2.x
+#   - wheel 包名叫 flashinfer-python (不是 flashinfer), 走 flashinfer.ai 官方索引
+#     cu124 + torch2.5 可用: 0.2.0.post2, 0.2.1.post1/2, 0.2.2(.post1), 0.2.3, 0.2.4, 0.2.5
 echo ""
-echo "=== 装 flashinfer (从 flashinfer.ai wheel 索引) ==="
+echo "=== 装 flashinfer-python (从 flashinfer.ai wheel 索引) ==="
 FLASHINFER_INDEX="https://flashinfer.ai/whl/cu124/torch2.5/"
 FLASHINFER_OK=0
-for V in "0.2.1.post1" "0.2.1" "0.2.0" "0.1.6"; do
-  echo "--- 试 flashinfer==${V} ---"
-  if pip install "flashinfer==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tail -5; then
+for V in "0.2.1.post2" "0.2.1.post1" "0.2.2.post1" "0.2.2" "0.2.0.post2" "0.2.3" "0.2.4" "0.2.5"; do
+  echo "--- 试 flashinfer-python==${V} ---"
+  if pip install "flashinfer-python==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tail -5; then
     FLASHINFER_OK=1; break
   fi
 done
 if [[ "${FLASHINFER_OK}" -eq 0 ]]; then
-  echo "⚠ 钉版本失败, 试最新 flashinfer (从 flashinfer.ai 索引)..."
-  pip install flashinfer --extra-index-url "${FLASHINFER_INDEX}" \
-    || echo "  ❌ flashinfer 装不上 (sglang 可能 fallback 到 triton, 不一定致命)"
+  echo "⚠ 钉版本失败, 试最新 flashinfer-python (从 flashinfer.ai 索引)..."
+  if pip install flashinfer-python --extra-index-url "${FLASHINFER_INDEX}" 2>&1 | tail -5; then
+    FLASHINFER_OK=1
+  fi
+fi
+if [[ "${FLASHINFER_OK}" -eq 0 ]]; then
+  echo "⚠ flashinfer.ai 索引也失败, 试 PyPI 上的 flashinfer-python (latest)..."
+  pip install flashinfer-python 2>&1 | tail -5 \
+    || echo "  ❌ flashinfer 装不上 (sglang 可 fallback 到 triton, 不一定致命)"
 fi
 
 # vllm: sglang server 依赖但 vllm 可能拉高 torch。策略:

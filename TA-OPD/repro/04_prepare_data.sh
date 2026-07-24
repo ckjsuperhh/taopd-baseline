@@ -17,6 +17,9 @@ echo "[1/4] Downloading DAPO-Math-17k..."
 RAW_DIR="${DATA_DIR}/dapo_math_17k_raw"
 mkdir -p "${RAW_DIR}"
 
+# Python heredoc 用 os.environ.get 读这些变量, 必须 export
+export DAPO_DIR RAW_DIR GSM8K_DIR
+
 python3 << 'PYEOF'
 import json, os, sys
 from datasets import load_dataset

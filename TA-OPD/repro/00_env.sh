@@ -6,7 +6,7 @@
 set -eo pipefail  # 不能用 -u：conda 内部 deactivate 脚本有 unbound variable
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-PROJECT_ROOT="${PROJECT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd_baseline}"
+PROJECT_ROOT="${PROJECT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/CacheOPD/taopd-baseline}"
 DATA_DIR="${DATA_DIR:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/data}"
 MODEL_DIR="${MODEL_DIR:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/modelweights}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/dk/outputs}"

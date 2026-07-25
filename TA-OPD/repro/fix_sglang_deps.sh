@@ -9,7 +9,7 @@
 #   4) vllm (sglang 0.4.1 硬要 >=0.6.3.post1, 但 vllm 会拉低 torch 到 2.4)
 #   5) 强制 torch 回退到 2.5.1+cu124 (覆盖 vllm 拉的 2.4)
 #   6) 验证 import + 提示 server 用 --attention-backend triton 避开 flashinfer 兼容问题
-set -u
+set -eo pipefail  # 不能用 -u：conda 内部 activate 脚本有 unbound variable (SYS_SYSROOT 等)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/00_env.sh"
 activate_env

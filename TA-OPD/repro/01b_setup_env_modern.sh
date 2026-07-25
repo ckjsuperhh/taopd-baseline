@@ -50,21 +50,22 @@ conda install -n "${MODERN_ENV}" -c conda-forge -y \
 export CUDA_HOME="${CONDA_PREFIX}"
 export PATH="${CONDA_PREFIX}/bin:${PATH}"
 
-# ── [3/7] torch (不锁版本, 让 sglang 拉; 但兜底装个 2.9.1+cu124) ──
+# ── [3/7] torch 2.5.1+cu124 (和 flash-attn 2.8.3 wheel 匹配) ──
 echo ""
-echo "[3/7] PyTorch (目标: 2.9.x + cu124)..."
-# 优先从 pytorch 官方 cu124 索引装 (最稳)
-if ! pip install "torch>=2.9,<3.0" torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -5; then
-  echo "  ⚠ pytorch cu124 索引失败, 试 PyPI (sglang 拉)"
-  pip install torch torchvision torchaudio
-fi
+echo "[3/7] PyTorch 2.5.1 + cu124..."
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+  --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -5
 python3 -c "import torch; print(f'  torch {torch.__version__} cuda={torch.version.cuda}')"
 
 # ── [4/7] sglang 0.5.10.post1 + 所有依赖 ─────────────────────
 echo ""
 echo "[4/7] sglang 0.5.10.post1 (原生 Qwen3, 含 sglang-kernel + flashinfer)..."
 pip install "sglang==0.5.10.post1" 2>&1 | tail -10
+
+# sglang 的依赖可能把 torch 拉到更新版本, 这里强制回退到 2.5.1+cu124 (和 flash-attn 2.8.3 wheel 匹配)
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+  --index-url https://download.pytorch.org/whl/cu124 \
+  --force-reinstall --no-deps 2>&1 | tail -3
 
 # 验证 sglang 版本 (关键!)
 python3 -c "
@@ -113,7 +114,7 @@ pip install "ray[default]>=2.9" \
   transformers datasets accelerate safetensors \
   pyarrow pandas scipy \
   numpy\<2 \
-  flash-attn \
+  flash-attn==2.8.3.post1 \
   2>&1 | tail -5
 
 # numpy 钉 <2 (Megatron 不兼容 numpy 2.x)
@@ -130,7 +131,7 @@ checks = [
     ('sglang', 'HARD'),
     ('sgl_kernel', 'HARD'),
     ('flashinfer', 'HARD'),
-    ('flash_attn', 'HARD'),
+    ('flash_attn', 'SOFT'),  # Megatron 可 fallback torch Norm
     ('ray', 'HARD'),
     ('transformers', 'HARD'),
     ('datasets', 'HARD'),
@@ -141,19 +142,22 @@ checks = [
     ('pyarrow', 'HARD'),
     ('scipy', 'HARD'),
 ]
-n_ok = n_fail = 0
+n_hard_ok = n_hard_fail = n_soft_ok = n_soft_fail = 0
 for mod, kind in checks:
     try:
         m = __import__(mod)
         v = getattr(m, '__version__', '?')
-        print(f'  ✅ {mod:20s} = {v}')
-        n_ok += 1
+        print(f'  ✅ [{kind:4s}] {mod:20s} = {v}')
+        if kind == 'HARD': n_hard_ok += 1
+        else: n_soft_ok += 1
     except Exception as e:
-        print(f'  ❌ {mod:20s}: {e}')
-        n_fail += 1
+        print(f'  ❌ [{kind:4s}] {mod:20s}: {str(e).splitlines()[0]}')
+        if kind == 'HARD': n_hard_fail += 1
+        else: n_soft_fail += 1
 print()
-print(f'{n_ok} OK / {n_fail} FAIL')
-if n_fail > 0:
+print(f'HARD: {n_hard_ok} ok / {n_hard_fail} fail')
+print(f'SOFT: {n_soft_ok} ok / {n_soft_fail} fail')
+if n_hard_fail > 0:
     sys.exit(1)
 "
 

@@ -53,6 +53,8 @@ if [[ -d "${STUDENT_TORCH_DIST}" ]] && [[ -f "${STUDENT_TORCH_DIST}/latest_check
 else
   export SLIME_DIR="${REPO_ROOT}/slime_ta_opd"
   export MEGATRON_LM_DIR="${HOME}/taopd-faithful/Megatron-LM"
+  # GPU 0 被占用, 用 GPU 1
+  export CUDA_VISIBLE_DEVICES=1
   cd "${SLIME_DIR}"
   HF_MODEL="${STUDENT_HF}" \
   SAVE_DIR="${STUDENT_TORCH_DIST}" \

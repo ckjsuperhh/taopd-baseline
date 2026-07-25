@@ -104,16 +104,16 @@ echo "   CUDA_HOME = ${CUDA_HOME}"
 # 所以逐个装必需 dev 包, 任何一组失败就 fallback 到 conda-forge
 CUDA_CHANNEL="nvidia/label/cuda-12.9.1"
 micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
-  cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev \
+  cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev cuda-profiler-api \
   libcusparse-dev libcublas-dev libcufft-dev libcurand-dev libcusolver-dev \
   cuda-nvrtc-dev cuda-cccl cuda-crt \
   || micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
-      cuda-nvcc cuda-cudart-dev cuda-nvtx \
+      cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-profiler-api \
       libcusparse-dev libcublas-dev libcufft-dev libcurand-dev \
   || {
     echo "⚠ ${CUDA_CHANNEL} 解算失败, 试 conda-forge"
     micromamba install -n "${ENV_NAME}" -c conda-forge -y \
-      cuda-nvcc cuda-cudart-dev cuda-nvtx \
+      cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-profiler-api \
       cusparse cusolver cublas cufft curand
   }
 micromamba install -n "${ENV_NAME}" -c conda-forge cudnn -y

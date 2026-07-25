@@ -58,6 +58,18 @@ fi
 if ! command -v micromamba >/dev/null 2>&1; then
   export PATH="${MICROMAMBA_ROOT}/bin:${PATH}"
 fi
+# 再兜底: apex 上 micromamba 默认装到 ~/.local/bin/micromamba, env 在 ~/micromamba/
+if ! command -v micromamba >/dev/null 2>&1; then
+  if [[ -x "${HOME}/.local/bin/micromamba" ]]; then
+    export MAMBA_EXE="${HOME}/.local/bin/micromamba"
+    export MAMBA_ROOT_PREFIX="${MICROMAMBA_ROOT}"
+    eval "$("${MAMBA_EXE}" shell hook --shell bash --root-prefix "${MAMBA_ROOT_PREFIX}" 2>/dev/null)"
+  fi
+fi
+# 再再兜底: source ~/.bashrc 让 micromamba shell init 生效
+if ! command -v micromamba >/dev/null 2>&1; then
+  [[ -f "${HOME}/.bashrc" ]] && source "${HOME}/.bashrc"
+fi
 command -v micromamba >/dev/null 2>&1 || { echo "❌ micromamba 装不上"; exit 1; }
 micromamba --version
 
@@ -73,7 +85,14 @@ export CUDA_HOME="$CONDA_PREFIX"
 echo "✅ activated: ${ENV_NAME}"
 echo "   CUDA_HOME = ${CUDA_HOME}"
 
-micromamba install -n "${ENV_NAME}" cuda cuda-nvtx cuda-nvtx-dev nccl -c nvidia/label/cuda-12.9.1 -y
+# 注: 整包 `cuda` 在 nvidia/label/cuda-12.9.1 channel 用 libmamba 解算会冲突 (__win marker)
+# 只装 nvcc + headers (编译 flash-attn/TE/apex 必需), 其他 runtime libs 由 torch wheel 提供
+micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev -c nvidia/label/cuda-12.9.1 -y \
+  || micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev -c nvidia/label/cuda-12.9.1 -y \
+  || {
+    echo "⚠ nvidia/label/cuda-12.9.1 解算失败, 试 conda-forge cuda-nvcc"
+    micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev cuda-nvtx -c conda-forge -y
+  }
 micromamba install -n "${ENV_NAME}" -c conda-forge cudnn -y
 
 # ── Step 3: cuda-python + torch 2.9.1+cu129 ────────────────────────────

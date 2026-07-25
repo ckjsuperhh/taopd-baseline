@@ -14,40 +14,78 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/00_env.sh"
 activate_env
 
-# 让单包失败不中断整个脚本 (但 set -e 会在最后统一 exit)
-pip_one() {
-  if ! "$@"; then
-    echo "  ⚠ 命令失败: $*"
-    return 1
-  fi
-}
-
 # ─────────────────────────────────────────────────────────────────
 echo "=== [1/6] 先立 torch 2.5.1+cu124 ==="
-pip_one pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
-  --force-reinstall --no-deps
+  --force-reinstall --no-deps || echo "  ⚠ torch rollback 失败"
 
 echo ""
-echo "=== [2/6] 装 sglang server 运行时依赖 (逐个装, 失败不阻塞) ==="
-# pyairports (outlines 传递依赖) 单独 force, 之前被跳过就是因为没单独 force
-pip_one pip install --force-reinstall --no-deps pyairports || pip_one pip install pyairports
+echo "=== [2/6] 装 sglang server 运行时依赖 ==="
 
-# interegular (outlines 直接依赖, 之前漏了)
-pip_one pip install interegular
+# ── pyairports (outlines 传递依赖, 关键 HARD, 单独多策略处理) ────
+# 这包比较怪: PyPI 上 0.0.1 是 2025-09 才上线, 经常被 resolver 跳过。
+# 策略链: PyPI → GitHub 源码 → 替代包 airports-py → 重装 outlines 拉传递依赖
+PYAIRPORTS_OK=0
 
-# 常用 server 运行时依赖
+echo "--- [pyairports] 策略 1/4: PyPI ---"
+if pip install pyairports 2>&1 | tail -3; then
+  python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+fi
+
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  echo "--- [pyairports] 策略 2/4: GitHub 源码 (NICTA/pyairports) ---"
+  if pip install "pyairports @ git+https://github.com/NICTA/pyairports.git" 2>&1 | tail -3; then
+    python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+  fi
+fi
+
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  echo "--- [pyairports] 策略 3/4: GitHub 源码 (ozeliger/pyairports) ---"
+  if pip install "pyairports @ git+https://github.com/ozeliger/pyairports.git" 2>&1 | tail -3; then
+    python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+  fi
+fi
+
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  echo "--- [pyairports] 策略 4/4: 替代包 airports-py + airportsdata ---"
+  if pip install airports-py airportsdata 2>&1 | tail -3; then
+    python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+  fi
+fi
+
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  echo "--- [pyairports] 兜底: 重装 outlines 让其拉传递依赖 ---"
+  pip install --force-reinstall "outlines>=0.0.44,<0.1.0" 2>&1 | tail -3 || true
+  python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+fi
+
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  echo "  ❌ pyairports 所有策略都失败"
+  echo "     pip show pyairports:"
+  pip show pyairports 2>&1 | head -10 || true
+  echo "     pip show airports-py:"
+  pip show airports-py 2>&1 | head -10 || true
+else
+  echo "  ✅ pyairports 装上且可 import"
+  pip show pyairports 2>/dev/null | head -3 || true
+fi
+
+# ── interegular (outlines 直接依赖, 之前漏了) ─────────────────────
+pip install interegular 2>&1 | tail -2 || echo "  ⚠ interegular 装不上"
+
+# ── 常用 server 运行时依赖 (一次性 bulk, 单包失败不阻塞) ─────────
 for P in \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \
   setproctitle diskcache cloudpickle tiktoken numba coloredlogs packaging \
   sentencepiece protobuf nvidia-ml-py openai IPython tqdm; do
-  pip_one pip install "${P}"
+  pip install "${P}" 2>&1 | tail -2 || echo "  ⚠ ${P} 装不上"
 done
 
 # xgrammar: 仅 xgrammar 后端需要, 默认是 outlines, 装不上不致命
-pip_one pip install "xgrammar>=0.1.6" || echo "  (xgrammar 装不上不致命, 默认走 outlines 后端)"
+pip install "xgrammar>=0.1.6" 2>&1 | tail -2 || echo "  (xgrammar 装不上不致命, 默认走 outlines 后端)"
 
 echo ""
 echo "=== [3/6] 装 flashinfer-python (cu124 + torch2.5, 非必需但推荐) ==="
@@ -88,9 +126,9 @@ fi
 
 echo ""
 echo "=== [5/6] 强制 torch 回退到 2.5.1+cu124 ==="
-pip_one pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
-  --force-reinstall --no-deps
+  --force-reinstall --no-deps || echo "  ⚠ torch rollback 失败"
 
 echo ""
 echo "=== [6/6] 验证 import ==="
@@ -126,9 +164,9 @@ mods = [
     ('outlines', 'HARD'),
     ('interegular', 'HARD'),
     ('triton', 'HARD'),
+    ('pyairports', 'HARD'),  # 本次修复的关键
     # SOFT
     ('flashinfer', 'SOFT'),
-    ('pyairports', 'SOFT'),
     ('xgrammar', 'SOFT'),
     ('tiktoken', 'SOFT'),
     ('sentencepiece', 'SOFT'),
@@ -165,7 +203,7 @@ print('=== 关键版本 ===')
 import torch
 print(f'  torch         = {torch.__version__}')
 print(f'  torch.cuda    = {torch.version.cuda}')
-for pkg in ['vllm', 'sglang', 'sgl_kernel', 'flashinfer', 'outlines', 'pyairports', 'pyzmq', 'prometheus_client']:
+for pkg in ['vllm', 'sglang', 'sgl_kernel', 'flashinfer', 'outlines', 'pyairports', 'pyzmq', 'prometheus_client', 'interegular']:
     try:
         m = __import__(pkg)
         v = getattr(m, '__version__', getattr(m, 'VERSION', '?'))

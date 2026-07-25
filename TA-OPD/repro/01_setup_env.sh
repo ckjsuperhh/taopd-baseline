@@ -66,8 +66,20 @@ pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
   || { echo "  ❌ sgl-kernel==0.1.0 装不上 (rollout 引擎必需)"; false; }
 
 # sglang server 运行时依赖 (bare sglang==0.4.1 不带 [all] extras)
-# pyairports 单独 force, 避免被 resolver 跳过
-pip install --force-reinstall --no-deps pyairports 2>/dev/null || pip install pyairports
+# pyairports 单独多策略链 (这包经常被 resolver 跳过, PyPI 0.0.1 2025-09 才上线)
+PYAIRPORTS_OK=0
+pip install pyairports 2>&1 | tail -2 && python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  pip install "pyairports @ git+https://github.com/NICTA/pyairports.git" 2>&1 | tail -2 \
+    && python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+fi
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  pip install "pyairports @ git+https://github.com/ozeliger/pyairports.git" 2>&1 | tail -2 \
+    && python3 -c "import pyairports" 2>/dev/null && PYAIRPORTS_OK=1 || true
+fi
+if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
+  pip install airports-py airportsdata 2>&1 | tail -2 || echo "  ⚠ pyairports 装不上 (outlines/server 会失败)"
+fi
 pip install interegular
 pip install \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \

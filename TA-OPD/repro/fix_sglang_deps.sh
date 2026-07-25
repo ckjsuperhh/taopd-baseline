@@ -75,7 +75,9 @@ fi
 pip install interegular 2>&1 | tail -2 || echo "  ⚠ interegular 装不上"
 
 # ── 常用 server 运行时依赖 (一次性 bulk, 单包失败不阻塞) ─────────
+# setuptools 必须显式装 (提供 pkg_resources), Python 3.12+ 不预装
 for P in \
+  "setuptools>=68" \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \
@@ -165,6 +167,7 @@ mods = [
     ('interegular', 'HARD'),
     ('triton', 'HARD'),
     ('pyairports', 'HARD'),  # 本次修复的关键
+    ('pkg_resources', 'HARD'),  # 来自 setuptools
     # SOFT
     ('flashinfer', 'SOFT'),
     ('xgrammar', 'SOFT'),

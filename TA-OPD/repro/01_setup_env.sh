@@ -82,6 +82,7 @@ if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
 fi
 pip install interegular
 pip install \
+  "setuptools>=68" \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \

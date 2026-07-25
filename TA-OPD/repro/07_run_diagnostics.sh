@@ -69,10 +69,9 @@ run_diagnostic() {
   echo "  Starting teacher..."
   CUDA_VISIBLE_DEVICES="${teacher_gpu}" python3 -m sglang.launch_server \
     --model-path "${TEACHER_MODEL}" --host 0.0.0.0 --port "${TEACHER_PORT}" \
-    --nccl-port "${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
+    --dist-init-addr "127.0.0.1:${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
-    --disable-piecewise-cuda-graph \
     --attention-backend triton \
     > "${diag_log}.teacher" 2>&1 &
   teacher_pid=$!

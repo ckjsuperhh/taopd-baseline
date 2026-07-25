@@ -56,9 +56,8 @@ run_smoke() {
   echo "  Starting teacher SGLang on GPU ${teacher_gpu}..."
   CUDA_VISIBLE_DEVICES="${teacher_gpu}" python3 -m sglang.launch_server \
     --model-path "${TEACHER_MODEL}" --host 0.0.0.0 --port "${teacher_port}" \
-    --nccl-port "${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
+    --dist-init-addr "127.0.0.1:${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${TEACHER_MEM_FRACTION}" --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
-    --disable-piecewise-cuda-graph \
     --attention-backend triton \
     > "${LOG_DIR}/${name}_teacher.log" 2>&1 &
   teacher_pid=$!

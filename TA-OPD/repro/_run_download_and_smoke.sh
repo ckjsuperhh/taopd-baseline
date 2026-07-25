@@ -51,7 +51,9 @@ echo "=== [3/4] Convert Qwen3-1.7B -> torch_dist ==="
 if [[ -d "${STUDENT_TORCH_DIST}" ]] && [[ -f "${STUDENT_TORCH_DIST}/latest_checkpointed_iteration.txt" || -d "${STUDENT_TORCH_DIST}/iter_0000000" ]]; then
   echo "已存在, 跳过"
 else
-  cd "${REPO_ROOT}/slime_ta_opd"
+  export SLIME_DIR="${REPO_ROOT}/slime_ta_opd"
+  export MEGATRON_LM_DIR="${HOME}/taopd-faithful/Megatron-LM"
+  cd "${SLIME_DIR}"
   HF_MODEL="${STUDENT_HF}" \
   SAVE_DIR="${STUDENT_TORCH_DIST}" \
   NPROC_PER_NODE=1 \

@@ -23,11 +23,21 @@ echo "nvcc at $(which nvcc)"
 
 echo ""
 echo "--- [6b] apex (预计 20-30min) ---"
+APEX_LOG="${HOME}/taopd-faithful-logs/apex_build.log"
 NVCC_APPEND_FLAGS="--threads 4" \
   pip install --disable-pip-version-check --no-cache-dir \
   --no-build-isolation \
   --config-settings "--build-option=--cpp_ext --cuda_ext --parallel 8" \
-  git+https://github.com/NVIDIA/apex.git@10417aceddd7d5d05d7cbf7b0fc2daad1105f8b4 2>&1 | tail -15
+  git+https://github.com/NVIDIA/apex.git@10417aceddd7d5d05d7cbf7b0fc2daad1105f8b4 > "${APEX_LOG}" 2>&1
+APEX_EXIT=$?
+echo "apex install exit=${APEX_EXIT} (full log: ${APEX_LOG})"
+tail -20 "${APEX_LOG}"
+if [[ ${APEX_EXIT} -ne 0 ]]; then
+  echo "=== apex FAILED ==="
+  echo "First fatal errors:"
+  grep -E 'fatal error|FAILED:|error:' "${APEX_LOG}" | head -10
+  exit ${APEX_EXIT}
+fi
 
 echo ""
 echo "=== [7/9] torch_memory_saver / Megatron-Bridge / modelopt / sgl-router ==="

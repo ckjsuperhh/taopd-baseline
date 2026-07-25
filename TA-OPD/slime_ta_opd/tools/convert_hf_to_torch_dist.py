@@ -98,8 +98,11 @@ def main():
     os.environ.setdefault("LOCAL_RANK", str(local_rank))
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "12355")
+    # 单进程转换: 用 gloo 避 NCCL (apex 驱动 530.30.02 只 CUDA 12.1,
+    # 而 torch 2.9.1+cu129 带 NCCL 2.27.5 调 cudaFuncGetAttributes 会 segfault)
+    backend = "gloo" if world_size == 1 else "nccl"
     dist.init_process_group(
-        backend="nccl",
+        backend=backend,
         world_size=world_size,
         rank=global_rank,
         device_id=torch.device(f"cuda:{local_rank}"),

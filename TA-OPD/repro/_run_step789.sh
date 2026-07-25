@@ -25,8 +25,8 @@ MEGATRON_DIR="${BASE_DIR}/Megatron-LM"
 MEGATRON_LOCAL="${HOME}/taopd-baseline/Megatron-LM"
 if [[ ! -d "${MEGATRON_DIR}" ]]; then
   if [[ -d "${MEGATRON_LOCAL}" ]]; then
-    echo "复用本地 Megatron-LM: ${MEGATRON_LOCAL}"
-    cp -a "${MEGATRON_LOCAL}" "${MEGATRON_DIR}"
+    echo "从本地 Megatron-LM clone (--dissociate, 干净副本): ${MEGATRON_LOCAL}"
+    git clone --dissociate "${MEGATRON_LOCAL}" "${MEGATRON_DIR}"
   else
     git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_DIR}"
   fi

@@ -57,7 +57,9 @@ cd "${SLIME_DIR}"
 pip install -e . 2>&1 | tail -5
 
 pip install "nvidia-cudnn-cu12==9.16.0.29" 2>&1 | tail -3
-pip install "numpy<2" 2>&1 | tail -3
+# 官方 build_conda.sh 写的是 numpy<2, 但 transformers 4.57.1 + scipy 1.18 都要求 numpy>=2.0.
+# numpy 2.0.2 与 torch 2.9.1+cu129 兼容 (>=2.0.0).
+pip install "numpy==2.0.2" 2>&1 | tail -3
 
 echo "-- apply sglang.patch --"
 cd "${BASE_DIR}/sglang"

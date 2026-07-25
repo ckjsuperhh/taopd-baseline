@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
-# 把 repro/ 下所有脚本适配到 sglang 0.5.10.post1 + torch 2.9 (全栈新版本)
+# 把 repro/ 下所有脚本适配到 sglang 0.5.10+ (全栈新版本)
+# 自动检测 sglang 版本, 决定用 --nccl-port 还是 --dist-init-addr
 #
 # 背景:
-#   用户已在 Inspur 上装了 sglang 0.5.10.post1 (原生支持 Qwen3),
-#   torch 2.9.1, flashinfer 0.6.7, sglang-kernel 0.4.1, flash-attn 4.0.0b23。
-#   这套栈和之前为 sglang 0.4.1 写的 repro/*.sh 有 3 处不兼容:
-#     1) --dist-init-addr 127.0.0.1:PORT → 应该用 --nccl-port PORT (0.5.10 支持)
-#     2) 05/06/07 开头调了 patch_qwen3_as_qwen2.sh / patch_sglang_qwen2_for_qwen3.sh
-#        → 0.5.10 原生支持 Qwen3, 不需要这些 monkey-patch
-#     3) 旧 fix_sglang_deps.sh 不再需要 (pip 已经把依赖装全了)
-#
-# 本脚本做:
-#   - sed 改 --dist-init-addr "127.0.0.1:${PORT_VAR}" → --nccl-port "${PORT_VAR}"
-#   - 注释掉 patch_qwen3_as_qwen2.sh / patch_sglang_qwen2_for_qwen3.sh 调用
-#   - 在每个改动文件顶部加标记 # TAOPD_ADAPT_V1 (幂等)
-#   - 备份到 .pre_adapt (幂等: 已适配则跳过, 想还原 mv .pre_adapt 回去)
+#   - sglang 0.5.10+ 支持 --nccl-port, 原生支持 Qwen3 (含 q_norm/k_norm)
+#   - sglang 0.4.1 只有 --dist-init-addr, 不认 Qwen3 (需要 monkey-patch)
+#   - 本脚本自动检测, 按版本选参数; 0.4.1 会警告但仍适配 CLI
 #
 # 用法: bash repro/adapt_for_sglang_0_5_10.sh
 set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "========================================="
-echo " 适配 sglang 0.5.10 + torch 2.9 (全栈新)"
+echo " 适配 sglang (自动检测版本)"
 echo "========================================="
+
+# ── 检测 sglang 版本 ──────────────────────────────────────────
+SGLANG_VERSION="$(python3 -c "import sglang; print(getattr(sglang, '__version__', '0.0.0'))" 2>/dev/null || echo "0.0.0")"
+echo "📊 当前 sglang: ${SGLANG_VERSION}"
+
+# 比较版本: 0.5.x+ 用 --nccl-port, 0.4.x 用 --dist-init-addr
+version_ge() {
+  # $1 >= $2 ?
+  [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+if version_ge "${SGLANG_VERSION}" "0.5.0"; then
+  USE_NCCL_PORT=1
+  NCCL_FLAG="--nccl-port"
+  NEED_QWEN3_PATCH=0
+  echo "✅ sglang 0.5.x+ detected: 用 --nccl-port, 不需要 Qwen3 monkey-patch"
+else
+  USE_NCCL_PORT=0
+  NCCL_FLAG="--dist-init-addr 127.0.0.1:\${PORT_VAR}"
+  NEED_QWEN3_PATCH=1
+  echo "⚠️  sglang <0.5 detected (${SGLANG_VERSION}): 用 --dist-init-addr, Qwen3 需要 monkey-patch"
+  echo "   强烈建议升级到 sglang 0.5.10.post1: pip install 'sglang==0.5.10.post1'"
+fi
 
 # ── helper: 改一个文件 ─────────────────────────────────────────
 adapt_one() {
@@ -31,71 +45,64 @@ adapt_one() {
     echo "  ⏭  不存在: $f"
     return 0
   fi
-  if grep -q "TAOPD_ADAPT_V1" "$f"; then
-    echo "  ⏭  已适配: $f"
-    return 0
+
+  # 备份 (幂等: 有 .pre_adapt 就从它开始, 否则新建)
+  if [[ -f "${f}.pre_adapt" ]]; then
+    cp "${f}.pre_adapt" "$f"
+  else
+    cp "$f" "${f}.pre_adapt"
   fi
 
-  # 备份
-  cp "$f" "${f}.pre_adapt"
+  if [[ "${USE_NCCL_PORT}" -eq 1 ]]; then
+    # 模式 A: sglang 0.5.10+
+    # 1a) --dist-init-addr "127.0.0.1:${XXX}" → --nccl-port "${XXX}"
+    sed -i -E 's|--dist-init-addr "127\.0\.0\.1:\$\{([A-Za-z_]+)\}"|--nccl-port "\${\1}"|g' "$f"
+    # 2a) 注释掉 monkey-patch 调用 (0.5.10 不需要)
+    sed -i -E 's|^\s*bash "\$\{SCRIPT_DIR\}/patch_qwen3_as_qwen2\.sh"|# &|g' "$f"
+    sed -i -E 's|^\s*bash "\$\{SCRIPT_DIR\}/patch_sglang_qwen2_for_qwen3\.sh"|# &|g' "$f"
+  else
+    # 模式 B: sglang 0.4.1
+    # 1b) --nccl-port "${XXX}" → --dist-init-addr "127.0.0.1:${XXX}"
+    sed -i -E 's|--nccl-port "\$\{([A-Za-z_]+)\}"|--dist-init-addr "127.0.0.1:\${\1}"|g' "$f"
+    # 2b) 保持 monkey-patch 调用 (如果有的话)
+  fi
 
-  # 1) --dist-init-addr "127.0.0.1:${XXX}" → --nccl-port "${XXX}"
-  #    注意: 之前改成 --dist-init-addr 时, 端口变量名各不相同
-  #    (nccl_port / TEACHER_NCCL_PORT), 这里用通用 regex
-  sed -i -E 's|--dist-init-addr "127\.0\.0\.1:\$\{([A-Za-z_]+)\}"|--nccl-port "\${\1}"|g' "$f"
-
-  # 2) 注释掉 patch_qwen3_as_qwen2.sh 调用 (整行)
-  sed -i 's|^\(\s*\)bash "\${SCRIPT_DIR}/patch_qwen3_as_qwen2\.sh"|\1# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3, 不再需要 Qwen3→Qwen2 伪装 patch\n\1# bash "\${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"|g' "$f"
-
-  # 3) 注释掉 patch_sglang_qwen2_for_qwen3.sh 调用
-  sed -i 's|^\(\s*\)bash "\${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3\.sh"|\1# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3 q_norm/k_norm, 不再 monkey-patch\n\1# bash "\${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"|g' "$f"
-
-  # 4) 顶部加标记 (幂等标识, 下次跑跳过)
-  sed -i '2i # TAOPD_ADAPT_V1: adapted for sglang 0.5.10 + torch 2.9 (native Qwen3)' "$f"
-
-  echo "  ✅ 适配: $f  (备份: ${f}.pre_adapt)"
+  echo "  ✅ 适配: $f"
 }
 
 # ── 适配 3 个含 teacher server launch 的脚本 ───────────────────
 echo ""
-echo "=== [1/2] 适配 smoke test / training / diagnostics ==="
+echo "=== 适配 smoke test / training / diagnostics ==="
 adapt_one "${SCRIPT_DIR}/05_smoke_test.sh"
 adapt_one "${SCRIPT_DIR}/06_run_all_training.sh"
 adapt_one "${SCRIPT_DIR}/07_run_diagnostics.sh"
 
 # ── 检查适配结果 ──────────────────────────────────────────────
 echo ""
-echo "=== [2/2] 验证适配结果 ==="
+echo "=== 验证适配结果 ==="
 for f in 05_smoke_test.sh 06_run_all_training.sh 07_run_diagnostics.sh; do
   P="${SCRIPT_DIR}/${f}"
   echo "--- $f ---"
-  echo "  --nccl-port 出现次数: $(grep -c '\-\-nccl-port' "$P" || echo 0)"
-  echo "  --dist-init-addr 出现次数: $(grep -c '\-\-dist-init-addr' "$P" || echo 0)"
-  echo "  patch_qwen3 调用 (未注释): $(grep -E '^\s*bash.*patch_qwen3' "$P" | wc -l)"
-  echo "  patch_sglang 调用 (未注释): $(grep -E '^\s*bash.*patch_sglang_qwen2' "$P" | wc -l)"
+  echo "  --nccl-port 出现次数:       $(grep -c '\-\-nccl-port' "$P" 2>/dev/null || echo 0)"
+  echo "  --dist-init-addr 出现次数:  $(grep -c '\-\-dist-init-addr' "$P" 2>/dev/null || echo 0)"
+  echo "  patch_qwen3 调用 (未注释):  $(grep -E '^[[:space:]]*bash.*patch_qwen3' "$P" 2>/dev/null | wc -l)"
+  echo "  patch_sglang 调用 (未注释): $(grep -E '^[[:space:]]*bash.*patch_sglang_qwen2' "$P" 2>/dev/null | wc -l)"
 done
 
-# ── 列出可以删除的旧 patch 脚本 (可选) ───────────────────────
-echo ""
-echo "=== 不再需要的脚本 (可手动删除) ==="
-for OLD in patch_qwen3_as_qwen2.sh patch_sglang_qwen2_for_qwen3.sh fix_sglang_deps.sh; do
-  if [[ -f "${SCRIPT_DIR}/${OLD}" ]]; then
-    echo "  📄 ${OLD}  (sglang 0.5.10 原生解决这些问题)"
-  fi
-done
-echo "  # 删除命令 (可选):"
-echo "  #   rm repro/patch_qwen3_as_qwen2.sh repro/patch_sglang_qwen2_for_qwen3.sh repro/fix_sglang_deps.sh"
+# ── 列出可以删除的旧 patch 脚本 (0.5.10 下不需要) ───────────
+if [[ "${NEED_QWEN3_PATCH}" -eq 0 ]]; then
+  echo ""
+  echo "=== 不再需要的脚本 (0.5.10 原生解决, 可手动删除) ==="
+  for OLD in patch_qwen3_as_qwen2.sh patch_sglang_qwen2_for_qwen3.sh fix_sglang_deps.sh; do
+    [[ -f "${SCRIPT_DIR}/${OLD}" ]] && echo "  📄 ${OLD}"
+  done
+fi
 
 echo ""
 echo "========================================="
-echo " 适配完成"
+echo " 适配完成 (sglang ${SGLANG_VERSION})"
 echo ""
 echo " 下一步:"
-echo "   bash repro/run_all.sh 3    # 先跑 student 转换 (Megatron)"
+echo "   bash repro/run_all.sh 3    # 先跑 student conversion"
 echo "   bash repro/run_all.sh 5    # 再跑 smoke test"
-echo ""
-echo " 还原 (如果需要):"
-echo "   for f in repro/05_smoke_test.sh repro/06_run_all_training.sh repro/07_run_diagnostics.sh; do"
-echo "     mv \"\${f}.pre_adapt\" \"\$f\""
-echo "   done"
 echo "========================================="

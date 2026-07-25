@@ -8,6 +8,11 @@ echo "========================================="
 echo " Step 5: Smoke test (2 quick runs)"
 echo "========================================="
 
+# Patch Qwen3 dense 模型的 config.json 让 sglang 0.4.1 能加载
+# (sglang 0.4.1 2024-11 早于 Qwen3 发布, 不知道 Qwen3ForCausalLM)
+# 幂等: 只改一次, 后续重跑不会重复改
+bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
+
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
 CONDA_LIB="$(get_conda_lib)"

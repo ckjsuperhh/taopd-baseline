@@ -4,6 +4,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/00_env.sh"
 activate_env
 
+# Patch Qwen3 dense → Qwen2 config (sglang 0.4.1 不知道 Qwen3ForCausalLM)
+bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
+
 echo "========================================="
 echo " Step 6: Main training sweep (84 runs)"
 echo " 28 (mask,ratio) × 3 seeds × 2 lanes"

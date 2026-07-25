@@ -40,6 +40,8 @@ else
   echo "❌ 本地没有目标 commit, 需要 github 连接"
   exit 128
 fi
+# Megatron setup.py 调 `python -m pybind11 --includes`
+pip install pybind11 2>&1 | tail -3
 pip install -e . --no-build-isolation 2>&1 | tail -5
 
 echo ""

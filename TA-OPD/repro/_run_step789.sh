@@ -22,21 +22,35 @@ echo "=== [8/9] Megatron-LM @ 3714d81d418c9f1bca4594fc35f9e8289f652862 ==="
 BASE_DIR="${HOME}/taopd-faithful"
 mkdir -p "${BASE_DIR}"
 MEGATRON_DIR="${BASE_DIR}/Megatron-LM"
+MEGATRON_LOCAL="${HOME}/taopd-baseline/Megatron-LM"
 if [[ ! -d "${MEGATRON_DIR}" ]]; then
-  git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_DIR}"
+  if [[ -d "${MEGATRON_LOCAL}" ]]; then
+    echo "复用本地 Megatron-LM: ${MEGATRON_LOCAL}"
+    cp -a "${MEGATRON_LOCAL}" "${MEGATRON_DIR}"
+  else
+    git clone https://github.com/NVIDIA/Megatron-LM.git "${MEGATRON_DIR}"
+  fi
 fi
 cd "${MEGATRON_DIR}"
-git fetch --all --quiet
-git checkout 3714d81d418c9f1bca4594fc35f9e8289f652862
+# 尝试 fetch; 如果 github 不通, 直接用本地已有的 commit
+git fetch --all --quiet 2>/dev/null || echo "⚠ git fetch 失败 (github 不通), 假设目标 commit 已在本地"
+if git rev-parse -q --verify 3714d81d418c9f1bca4594fc35f9e8289f652862 >/dev/null; then
+  git checkout 3714d81d418c9f1bca4594fc35f9e8289f652862
+else
+  echo "❌ 本地没有目标 commit, 需要 github 连接"
+  exit 128
+fi
 pip install -e . --no-build-isolation 2>&1 | tail -5
 
 echo ""
 echo "=== [9/9] slime + cudnn pin + patches ==="
-if [[ ! -d "${BASE_DIR}/slime" ]]; then
-  cd "${BASE_DIR}"
-  git clone https://github.com/THUDM/slime.git
+# slime: 直接用 repo 自带的 slime_ta_opd/ (即 slime fork, 带 v0.5.9 patches)
+REPO_ROOT="${HOME}/taopd-baseline/TA-OPD"
+export SLIME_DIR="${REPO_ROOT}/slime_ta_opd"
+if [[ ! -d "${SLIME_DIR}/slime" ]]; then
+  echo "❌ ${SLIME_DIR}/slime 不存在"
+  exit 1
 fi
-export SLIME_DIR="${BASE_DIR}/slime"
 cd "${SLIME_DIR}"
 pip install -e . 2>&1 | tail -5
 

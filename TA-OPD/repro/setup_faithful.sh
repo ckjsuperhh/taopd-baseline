@@ -170,7 +170,7 @@ echo "=== [7/9] torch_memory_saver / Megatron-Bridge / modelopt / sgl-router ===
 pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@dc6876905830430b5054325fa4211ff302169c6b --no-cache-dir --force-reinstall
 pip install git+https://github.com/fzyzcjy/Megatron-Bridge.git@dev_rl --no-build-isolation
 pip install "nvidia-modelopt[torch]>=0.37.0" --no-build-isolation
-pip install https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl --force-reinstall
+pip install sglang-router==0.3.2
 
 # ── Step 8: Megatron-LM (指定 commit) ──────────────────────────────────
 echo ""

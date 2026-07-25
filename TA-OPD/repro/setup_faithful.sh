@@ -49,29 +49,43 @@ fi
 echo ""
 echo "=== [1/9] 安装 micromamba ==="
 mkdir -p "${MICROMAMBA_ROOT}"
-if [[ ! -x "${MICROMAMBA_ROOT}/bin/micromamba" ]]; then
-  yes '' | "${SHELL}" <(curl -L micro.mamba.pm/install.sh) 2>&1 | tail -10
+
+# 先查常见安装位置
+MM=""
+for p in "${HOME}/.local/bin/micromamba" "${MICROMAMBA_ROOT}/bin/micromamba"; do
+  if [[ -x "$p" ]]; then MM="$p"; break; fi
+done
+
+if [[ -z "${MM}" ]]; then
+  # 下载 + 安装, 带 retry (micro.mamba.pm 偶尔回空)
+  for attempt in 1 2 3 4 5; do
+    echo "  attempt ${attempt}: curl micro.mamba.pm/install.sh"
+    if curl -fsSL --retry 5 --retry-delay 3 --retry-connrefused \
+        -o /tmp/install_micromamba.sh https://micro.mamba.pm/install.sh; then
+      if yes '' | "${SHELL}" /tmp/install_micromamba.sh 2>&1 | tail -10; then
+        break
+      fi
+    fi
+    echo "  ⚠ attempt ${attempt} 失败, 等 5s"
+    sleep 5
+  done
+  [[ -f /tmp/install_micromamba.sh ]] && rm -f /tmp/install_micromamba.sh
   # 装完 source 一下让当前 shell 能用
-  if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc"; fi
-fi
-# 兜底: 如果 ~/.bashrc 没注入, 直接加到 PATH
-if ! command -v micromamba >/dev/null 2>&1; then
-  export PATH="${MICROMAMBA_ROOT}/bin:${PATH}"
-fi
-# 再兜底: apex 上 micromamba 默认装到 ~/.local/bin/micromamba, env 在 ~/micromamba/
-if ! command -v micromamba >/dev/null 2>&1; then
-  if [[ -x "${HOME}/.local/bin/micromamba" ]]; then
-    export MAMBA_EXE="${HOME}/.local/bin/micromamba"
-    export MAMBA_ROOT_PREFIX="${MICROMAMBA_ROOT}"
-    eval "$("${MAMBA_EXE}" shell hook --shell bash --root-prefix "${MAMBA_ROOT_PREFIX}" 2>/dev/null)"
-  fi
-fi
-# 再再兜底: source ~/.bashrc 让 micromamba shell init 生效
-if ! command -v micromamba >/dev/null 2>&1; then
   [[ -f "${HOME}/.bashrc" ]] && source "${HOME}/.bashrc"
+  # 重新检测
+  for p in "${HOME}/.local/bin/micromamba" "${MICROMAMBA_ROOT}/bin/micromamba"; do
+    if [[ -x "$p" ]]; then MM="$p"; break; fi
+  done
 fi
-command -v micromamba >/dev/null 2>&1 || { echo "❌ micromamba 装不上"; exit 1; }
-micromamba --version
+
+[[ -n "${MM}" ]] || { echo "❌ micromamba 装不上"; exit 1; }
+export MAMBA_EXE="${MM}"
+export MAMBA_ROOT_PREFIX="${MICROMAMBA_ROOT}"
+# 定义 shell function, 让后续脚本能直接 `micromamba xxx`
+micromamba() { "${MAMBA_EXE}" "$@"; }
+export -f micromamba
+echo "✅ micromamba: ${MM}"
+"${MM}" --version
 
 # ── Step 2: 创建 env + 装 CUDA 12.9 + cudnn ────────────────────────────
 echo ""
@@ -79,19 +93,28 @@ echo "=== [2/9] conda env + CUDA 12.9 + cudnn ==="
 if ! micromamba env list | awk '{print $1}' | grep -xq "${ENV_NAME}"; then
   micromamba create -n "${ENV_NAME}" python=3.12 pip -c conda-forge -y
 fi
-eval "$(micromamba shell hook --shell bash)"
+eval "$("${MAMBA_EXE}" shell hook --shell bash --root-prefix "${MAMBA_ROOT_PREFIX}")"
 micromamba activate "${ENV_NAME}"
 export CUDA_HOME="$CONDA_PREFIX"
 echo "✅ activated: ${ENV_NAME}"
 echo "   CUDA_HOME = ${CUDA_HOME}"
 
 # 注: 整包 `cuda` 在 nvidia/label/cuda-12.9.1 channel 用 libmamba 解算会冲突 (__win marker)
-# 只装 nvcc + headers (编译 flash-attn/TE/apex 必需), 其他 runtime libs 由 torch wheel 提供
-micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev -c nvidia/label/cuda-12.9.1 -y \
-  || micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev -c nvidia/label/cuda-12.9.1 -y \
+# 但 transformer_engine / apex / flash-attn 编译需要全套 CUDA dev headers,
+# 所以逐个装必需 dev 包, 任何一组失败就 fallback 到 conda-forge
+CUDA_CHANNEL="nvidia/label/cuda-12.9.1"
+micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
+  cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev \
+  libcusparse-dev libcublas-dev libcufft-dev libcurand-dev libcusolver-dev \
+  cuda-nvrtc-dev cuda-cccl cuda-crt \
+  || micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
+      cuda-nvcc cuda-cudart-dev cuda-nvtx \
+      libcusparse-dev libcublas-dev libcufft-dev libcurand-dev \
   || {
-    echo "⚠ nvidia/label/cuda-12.9.1 解算失败, 试 conda-forge cuda-nvcc"
-    micromamba install -n "${ENV_NAME}" cuda-nvcc cuda-cudart-dev cuda-nvtx -c conda-forge -y
+    echo "⚠ ${CUDA_CHANNEL} 解算失败, 试 conda-forge"
+    micromamba install -n "${ENV_NAME}" -c conda-forge -y \
+      cuda-nvcc cuda-cudart-dev cuda-nvtx \
+      cusparse cusolver cublas cufft curand
   }
 micromamba install -n "${ENV_NAME}" -c conda-forge cudnn -y
 
@@ -133,7 +156,7 @@ MAX_JOBS="${MAX_JOBS:-8}" pip -v install flash-attn==2.7.4.post1 --no-build-isol
 echo ""
 echo "=== [6/9] mbridge / transformer_engine / flash-linear-attention / apex ==="
 pip install git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c --no-deps
-pip install --no-build-isolation "transformer_engine[pytorch]==2.10.0"
+NVTE_PYTORCH_FORCE_BUILD=TRUE pip install --no-build-isolation "transformer_engine[pytorch]==2.10.0"
 pip install flash-linear-attention==0.4.1
 NVCC_APPEND_FLAGS="--threads 4" \
   pip -v install --disable-pip-version-check --no-cache-dir \

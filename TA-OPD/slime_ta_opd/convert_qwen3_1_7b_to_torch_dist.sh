@@ -33,9 +33,11 @@ NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 MASTER_PORT="${MASTER_PORT:-29617}"
 FORCE="${FORCE:-0}"
 CHECK_ONLY="${CHECK_ONLY:-0}"
-# The opsd env on gpu-node does not have Transformer Engine. Megatron's
-# default rope fusion requires TE, so keep it disabled unless explicitly changed.
-EXTRA_MEGATRON_ARGS="${EXTRA_MEGATRON_ARGS:---no-rope-fusion --transformer-impl local --no-persist-layer-norm --no-gradient-accumulation-fusion}"
+# On apex-llm the env has Transformer Engine, so we use TE (TENorm supports
+# RMSNorm). The local backend's FusedLayerNorm hardcodes LayerNorm-only and
+# would assert on Qwen3's RMSNorm. Keep --no-rope-fusion to avoid TE's
+# runtime rope-fusion kernel download (GitHub is blocked in CN).
+EXTRA_MEGATRON_ARGS="${EXTRA_MEGATRON_ARGS:---no-rope-fusion --no-persist-layer-norm --no-gradient-accumulation-fusion}"
 
 if [[ ! -d "${SLIME_DIR}" ]]; then
   echo "ERROR: SLIME_DIR does not exist: ${SLIME_DIR}" >&2

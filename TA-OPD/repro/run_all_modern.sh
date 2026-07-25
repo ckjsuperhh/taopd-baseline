@@ -15,7 +15,7 @@ MODERN_ENV="${MODERN_ENV:-ta_opd_modern}"
 START_STEP="${1:-3}"
 
 echo "========================================="
-echo " Modern pipeline (sglang 0.5.10 + torch 2.9)"
+echo " Modern pipeline (sglang 0.5.10 + torch 2.5.1+cu124)"
 echo " env:         ${MODERN_ENV}"
 echo " start_step:  ${START_STEP}"
 echo "========================================="

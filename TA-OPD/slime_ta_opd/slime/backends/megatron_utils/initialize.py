@@ -63,7 +63,9 @@ def init(args):
     _initialize_distributed(args)
 
     # https://github.com/NVIDIA/Megatron-LM/issues/1563
-    assert np.__version__.startswith("1."), "Megatron does not support numpy 2.x"
+    # apex 上 transformers 4.57.1 + scipy 1.18 强制 numpy>=2.0,
+    # 我们用 numpy 2.0.2, 实测能跑. 放宽断言.
+    assert np.__version__.startswith(("1.", "2.")), f"numpy version unsupported: {np.__version__}"
 
     # Random seeds for reproducibility.
     if args.rank == 0:

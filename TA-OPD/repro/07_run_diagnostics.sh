@@ -7,6 +7,9 @@ activate_env
 # Patch Qwen3 dense → Qwen2 config (sglang 0.4.1 不知道 Qwen3ForCausalLM)
 bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
 
+# Patch sglang 的 Qwen2Attention (让 Qwen3 的 q_norm/k_norm 能被 load_weights 吃下)
+bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
+
 echo "========================================="
 echo " Step 7: Diagnostic runs (heldout + gsm8k)"
 echo "========================================="

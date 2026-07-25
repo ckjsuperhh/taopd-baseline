@@ -13,6 +13,11 @@ echo "========================================="
 # 幂等: 只改一次, 后续重跑不会重复改
 bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
 
+# Patch sglang 的 Qwen2Attention, 让它能加载 Qwen3 的 q_norm / k_norm
+# (Qwen3 多了 per-head RMSNorm 在 attention 里, Qwen2 没有 → load_weights KeyError)
+# 幂等: 已打过 patch (TAOPD_PATCH_V1 标记) 则跳过
+bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
+
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
 CONDA_LIB="$(get_conda_lib)"

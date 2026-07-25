@@ -63,6 +63,7 @@ init_context_bank() {
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
     --disable-piecewise-cuda-graph \
+    --attention-backend triton \
     > "${init_log}.teacher" 2>&1 &
   teacher_pid=$!
 
@@ -210,6 +211,7 @@ run_single() {
     --mem-fraction-static "${TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
     --disable-piecewise-cuda-graph \
+    --attention-backend triton \
     > "${train_log}.teacher" 2>&1 &
   teacher_pid=$!
 

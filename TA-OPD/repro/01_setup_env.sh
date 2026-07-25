@@ -65,35 +65,37 @@ pip install "sgl-kernel==0.1.0" --extra-index-url "${FLASHINFER_INDEX}" \
   || pip install "sgl-kernel==0.1.0" \
   || { echo "  ❌ sgl-kernel==0.1.0 装不上 (rollout 引擎必需)"; false; }
 
-# bare sglang 不带 [all] extras 的运行时依赖 (teacher/rollout SGLang server 要用)
-# 一次性补齐 sglang[all]==0.4.1 通常会带上的常见依赖, 避免 server 启动时 import 失败
+# sglang server 运行时依赖 (bare sglang==0.4.1 不带 [all] extras)
+# pyairports 单独 force, 避免被 resolver 跳过
+pip install --force-reinstall --no-deps pyairports 2>/dev/null || pip install pyairports
+pip install interegular
 pip install \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
-  pyzmq outlines prometheus_client setproctitle diskcache cloudpickle \
-  tiktoken numba coloredlogs packaging sentencepiece protobuf nvidia-ml-py openai \
-  pyairports
+  "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \
+  setproctitle diskcache cloudpickle tiktoken numba coloredlogs packaging \
+  sentencepiece protobuf nvidia-ml-py openai IPython tqdm
 
-# vllm: sglang server 依赖。钉已知与 torch 2.5.1+cu124 兼容的版本, 装完回退 torch
+# flashinfer: sglang 0.4.1 的 attention backend。默认 PyPI 的 0.1.6 已 yanked,
+# 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5)。wheel 包名叫 flashinfer-python。
+# 允许失败 (server 已改用 triton 后端, flashinfer 非必需)
+for V in "0.2.0.post2" "0.2.1.post1" "0.2.1.post2" "0.2.2.post1" "0.2.2" "0.2.3" "0.2.4" "0.2.5"; do
+  if pip install "flashinfer-python==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null; then break; fi
+done
+pip install flashinfer-python --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null \
+  || pip install flashinfer-python 2>/dev/null \
+  || echo "  ⚠ flashinfer 装不上 (server 已改用 triton 后端, 不影响)"
+
+# vllm: sglang server 硬依赖。钉已知与 torch 2.5.1+cu124 兼容的版本, 装完回退 torch
 for V in "0.6.3.post1" "0.6.3" "0.6.2" "0.6.1.post2"; do
   if pip install "vllm==${V}" 2>/dev/null; then break; fi
 done
 pip install vllm 2>/dev/null || echo "  ⚠ vllm 装不上 (sglang 可能 fallback 到自己的 backend)"
 
-# sglang 可能拉高 torch，回退
+# vllm 会把 torch 拉到 2.4, 这里强制回退到 2.5.1+cu124 (覆盖 vllm 拉的 2.4)
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
   --force-reinstall --no-deps
-
-# flashinfer: sglang 0.4.1 的 attention backend。默认 PyPI 的 0.1.6 已 yanked,
-# 走 flashinfer.ai 官方 wheel 索引 (cu124 + torch2.5)。wheel 包名叫 flashinfer-python。
-# 允许失败 (sglang 可 fallback 到 triton)
-for V in "0.2.1.post2" "0.2.1.post1" "0.2.2.post1" "0.2.2" "0.2.0.post2" "0.2.3" "0.2.4" "0.2.5"; do
-  if pip install "flashinfer-python==${V}" --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null; then break; fi
-done
-pip install flashinfer-python --extra-index-url "${FLASHINFER_INDEX}" 2>/dev/null \
-  || pip install flashinfer-python 2>/dev/null \
-  || echo "  ⚠ flashinfer 装不上 (sglang 可能 fallback 到 triton, 不一定致命)"
 
 # flash-attn 编译非常慢且容易失败；允许失败（训练时如果不用 flash-attn，Megatron 会 fallback）
 MAX_JOBS=4 pip install flash-attn --no-build-isolation || echo "  ⚠ flash-attn failed (non-fatal; Megatron can fall back)"

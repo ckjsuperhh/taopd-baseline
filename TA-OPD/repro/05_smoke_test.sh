@@ -59,6 +59,7 @@ run_smoke() {
     --nccl-port "${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${TEACHER_MEM_FRACTION}" --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
     --disable-piecewise-cuda-graph \
+    --attention-backend triton \
     > "${LOG_DIR}/${name}_teacher.log" 2>&1 &
   teacher_pid=$!
 

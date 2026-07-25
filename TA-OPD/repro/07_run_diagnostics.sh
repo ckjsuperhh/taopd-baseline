@@ -73,6 +73,7 @@ run_diagnostic() {
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
     --disable-piecewise-cuda-graph \
+    --attention-backend triton \
     > "${diag_log}.teacher" 2>&1 &
   teacher_pid=$!
 

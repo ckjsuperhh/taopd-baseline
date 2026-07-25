@@ -75,9 +75,19 @@ fi
 pip install interegular 2>&1 | tail -2 || echo "  ⚠ interegular 装不上"
 
 # ── 常用 server 运行时依赖 (一次性 bulk, 单包失败不阻塞) ─────────
-# setuptools 必须显式装 (提供 pkg_resources), Python 3.12+ 不预装
+# setuptools 必须钉 <80 (提供 pkg_resources), setuptools 80+ 已剥离 pkg_resources
+echo "--- setuptools (pkg_resources 来源, 钉 <80) ---"
+SETUPTOOLS_OK=0
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -2 \
+  && python3 -c "import pkg_resources" 2>/dev/null && SETUPTOOLS_OK=1 || true
+if [[ "${SETUPTOOLS_OK}" -eq 0 ]]; then
+  echo "  setuptools<80 失败, 试装独立 pkg_resources 包..."
+  pip install pkg_resources 2>&1 | tail -2 || echo "  ⚠ pkg_resources 装不上"
+fi
+python3 -c "import pkg_resources; print(f'  ✅ setuptools={__import__(\"setuptools\").__version__}, pkg_resources OK')" 2>/dev/null \
+  || echo "  ❌ pkg_resources 仍不可用"
+
 for P in \
-  "setuptools>=68" \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \
@@ -85,6 +95,12 @@ for P in \
   sentencepiece protobuf nvidia-ml-py openai IPython tqdm; do
   pip install "${P}" 2>&1 | tail -2 || echo "  ⚠ ${P} 装不上"
 done
+
+# bulk install 可能通过传递依赖把 setuptools 又拉到 80+, 这里再钉一次
+echo "--- 再次钉 setuptools<80 (防止 bulk 传递依赖拉高) ---"
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -2 || true
+python3 -c "import pkg_resources; print(f'  ✅ setuptools={__import__(\"setuptools\").__version__}, pkg_resources OK')" 2>/dev/null \
+  || echo "  ❌ pkg_resources 仍不可用"
 
 # xgrammar: 仅 xgrammar 后端需要, 默认是 outlines, 装不上不致命
 pip install "xgrammar>=0.1.6" 2>&1 | tail -2 || echo "  (xgrammar 装不上不致命, 默认走 outlines 后端)"
@@ -131,6 +147,11 @@ echo "=== [5/6] 强制 torch 回退到 2.5.1+cu124 ==="
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
   --force-reinstall --no-deps || echo "  ⚠ torch rollback 失败"
+
+# vllm 安装过程可能又把 setuptools 拉到 80+, 这里最后一次钉
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -1 || true
+python3 -c "import pkg_resources" 2>/dev/null \
+  || pip install pkg_resources 2>&1 | tail -1 || true
 
 echo ""
 echo "=== [6/6] 验证 import ==="

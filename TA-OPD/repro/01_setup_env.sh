@@ -81,8 +81,13 @@ if [[ "${PYAIRPORTS_OK}" -eq 0 ]]; then
   pip install airports-py airportsdata 2>&1 | tail -2 || echo "  ⚠ pyairports 装不上 (outlines/server 会失败)"
 fi
 pip install interegular
+# setuptools 钉 <80 (提供 pkg_resources), setuptools 80+ 已剥离 pkg_resources
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -2 \
+  || pip install "setuptools<80,>=68" 2>&1 | tail -2
+python3 -c "import pkg_resources" 2>/dev/null \
+  || pip install pkg_resources 2>&1 | tail -2 \
+  || echo "  ⚠ pkg_resources 装不上"
 pip install \
-  "setuptools>=68" \
   orjson fastapi uvicorn uvloop pydantic msgspec python-multipart \
   hf_transfer decord soundfile pillow requests aiohttp psutil \
   "pyzmq>=25.1.2" "outlines>=0.0.44,<0.1.0" "prometheus_client>=0.20.0" \
@@ -109,6 +114,11 @@ pip install vllm 2>/dev/null || echo "  ⚠ vllm 装不上 (sglang 可能 fallba
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
   --index-url https://download.pytorch.org/whl/cu124 \
   --force-reinstall --no-deps
+
+# vllm 可能又把 setuptools 拉到 80+, 这里最后一次钉 (pkg_resources 必需)
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -1 || true
+python3 -c "import pkg_resources" 2>/dev/null \
+  || pip install pkg_resources 2>&1 | tail -1 || true
 
 # flash-attn 编译非常慢且容易失败；允许失败（训练时如果不用 flash-attn，Megatron 会 fallback）
 MAX_JOBS=4 pip install flash-attn --no-build-isolation || echo "  ⚠ flash-attn failed (non-fatal; Megatron can fall back)"
@@ -206,6 +216,11 @@ chmod +x "${HOME}/.local/bin/curl"
 export PATH="${HOME}/.local/bin:${PATH}"
 
 # ── 验证 ─────────────────────────────────────────────────────────────────
+# 最后一次钉 setuptools<80 (ray/transformers 等可能又把 setuptools 拉到 80+)
+pip install --force-reinstall --no-deps "setuptools<80,>=68" 2>&1 | tail -1 || true
+python3 -c "import pkg_resources" 2>/dev/null \
+  || pip install pkg_resources 2>&1 | tail -1 || true
+
 echo ""
 echo "=== Verification ==="
 # 验证时必须把 Megatron-LM 和 slime_ta_opd 加入 PYTHONPATH，否则 import megatron 会失败

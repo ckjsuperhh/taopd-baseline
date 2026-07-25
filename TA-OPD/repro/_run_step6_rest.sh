@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 接在 _run_te_only.sh 之后, 跑 step 6 剩余 (flash-linear-attention + apex) + step 7-9
-# 前提: transformer_engine 2.10.0 已装好
+# 接在 _run_te_only.sh 之后, 续跑 step 6b(apex) + step 7-9
+# fla 已装好, TE 已装好
 set -eo pipefail
 LOG="${HOME}/taopd-faithful-logs/step6_rest.log"
 mkdir -p "$(dirname "${LOG}")"
@@ -12,15 +12,14 @@ export MAMBA_ROOT_PREFIX="${HOME}/micromamba"
 eval "$("${MAMBA_EXE}" shell hook --shell bash --root-prefix "${MAMBA_ROOT_PREFIX}")"
 micromamba activate ta_opd_faithful
 
-# TE 编译用到的 env (apex 也要用)
 NVIDIA_PKG="${CONDA_PREFIX}/lib/python3.12/site-packages/nvidia"
 export C_INCLUDE_PATH="${NVIDIA_PKG}/cusparse/include:${NVIDIA_PKG}/cublas/include:${NVIDIA_PKG}/cufft/include:${NVIDIA_PKG}/cusolver/include:${NVIDIA_PKG}/curand/include:${NVIDIA_PKG}/cudnn/include:${NVIDIA_PKG}/cuda_runtime/include:${NVIDIA_PKG}/nvtx/include:${NVIDIA_PKG}/cuda_nvrtc/include:${NVIDIA_PKG}/nccl/include:${C_INCLUDE_PATH:-}"
 export CPLUS_INCLUDE_PATH="${C_INCLUDE_PATH}"
 export LIBRARY_PATH="${NVIDIA_PKG}/cusparse/lib:${NVIDIA_PKG}/cublas/lib:${NVIDIA_PKG}/cufft/lib:${NVIDIA_PKG}/cusolver/lib:${NVIDIA_PKG}/curand/lib:${NVIDIA_PKG}/cudnn/lib:${NVIDIA_PKG}/cuda_runtime/lib:${NVIDIA_PKG}/nvtx/lib:${NVIDIA_PKG}/cuda_nvrtc/lib:${NVIDIA_PKG}/nccl/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="${LIBRARY_PATH}:${LD_LIBRARY_PATH:-}"
-
-echo "--- [6a] flash-linear-attention ---"
-pip install flash-linear-attention==0.4.1 2>&1 | tail -3
+export CUDA_HOME="${CONDA_PREFIX}"
+echo "CUDA_HOME=${CUDA_HOME}"
+echo "nvcc at $(which nvcc)"
 
 echo ""
 echo "--- [6b] apex (预计 20-30min) ---"
@@ -28,7 +27,7 @@ NVCC_APPEND_FLAGS="--threads 4" \
   pip install --disable-pip-version-check --no-cache-dir \
   --no-build-isolation \
   --config-settings "--build-option=--cpp_ext --cuda_ext --parallel 8" \
-  git+https://github.com/NVIDIA/apex.git@10417aceddd7d5d05d7cbf7b0fc2daad1105f8b4 2>&1 | tail -10
+  git+https://github.com/NVIDIA/apex.git@10417aceddd7d5d05d7cbf7b0fc2daad1105f8b4 2>&1 | tail -15
 
 echo ""
 echo "=== [7/9] torch_memory_saver / Megatron-Bridge / modelopt / sgl-router ==="
@@ -52,7 +51,6 @@ pip install -e . --no-build-isolation 2>&1 | tail -5
 
 echo ""
 echo "=== [9/9] slime + cudnn pin + patches ==="
-# slime: 官方 build_conda.sh 用 THUDM/slime clone 到 BASE_DIR/slime
 if [[ ! -d "${BASE_DIR}/slime" ]]; then
   cd "${BASE_DIR}"
   git clone https://github.com/THUDM/slime.git
@@ -62,12 +60,9 @@ cd "${SLIME_DIR}"
 pip install -e . 2>&1 | tail -5
 echo "slime installed at ${SLIME_DIR}"
 
-# cudnn pin
 pip install "nvidia-cudnn-cu12==9.16.0.29" 2>&1 | tail -3
-# numpy<2 (官方脚本约束)
 pip install "numpy<2" 2>&1 | tail -3
 
-# 打 patches (官方脚本路径)
 echo "-- apply sglang.patch to ${BASE_DIR}/sglang --"
 cd "${BASE_DIR}/sglang"
 if git apply --check "${SLIME_DIR}/docker/patch/v0.5.9/sglang.patch" 2>&1; then

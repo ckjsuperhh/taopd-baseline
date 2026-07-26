@@ -31,7 +31,6 @@ CUDA_VISIBLE_DEVICES="${CONVERT_GPU}" torchrun \
   tools/convert_hf_to_torch_dist.py \
   "${MODEL_ARGS[@]}" \
   --no-rope-fusion \
-  --transformer-impl local \
   --no-persist-layer-norm \
   --no-gradient-accumulation-fusion \
   --hf-checkpoint "${STUDENT_HF}" \

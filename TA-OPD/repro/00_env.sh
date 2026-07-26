@@ -13,7 +13,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-/inspire/hdd/project/multi-agent/zhangweinan-24046/d
 
 REPO_ROOT="${PROJECT_ROOT}/TA-OPD"
 SLIME_DIR="${REPO_ROOT}/slime_ta_opd"
-MEGATRON_LM_DIR="${PROJECT_ROOT}/Megatron-LM"
+MEGATRON_LM_DIR="${MEGATRON_LM_DIR:-/root/taopd-faithful/Megatron-LM}"
 TOOLS_DIR="${REPO_ROOT}/tools"
 REPRO_DIR="${REPO_ROOT}/repro"
 
@@ -26,8 +26,10 @@ HELDOUT_DATA="${DATA_DIR}/DAPO-Math-17k-dedup/dapo_math_17k_dedup_slime_heldout3
 GSM8K_DATA="${DATA_DIR}/GSM8K-COT/gsm8k_cot_slime_300_seed41717.jsonl"
 
 # ── Conda ──────────────────────────────────────────────────────────────────
-CONDA_ENV="${CONDA_ENV:-ta_opd}"
-CONDA_SH="${CONDA_SH:-$(conda info --base 2>/dev/null || echo "${HOME}/miniconda3")/etc/profile.d/conda.sh}"
+CONDA_ENV="${CONDA_ENV:-ta_opd_faithful}"
+CONDA_SH="${CONDA_SH:-}"
+MICROMAMBA_EXE="${MICROMAMBA_EXE:-/root/.local/bin/micromamba}"
+MICROMAMBA_ROOT_PREFIX="${MICROMAMBA_ROOT_PREFIX:-/root/micromamba}"
 
 # ── HuggingFace mirror (China mainland) ────────────────────────────────────
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
@@ -161,15 +163,22 @@ COMMON_CONTEXT="${HELDOUT_DIAG_DIR}/fixed_context/context_bank.parquet"
 BASELINE_METRICS="${HELDOUT_DIAG_DIR}/fixed_context/theta0_metrics.parquet"
 
 # ── Date tag for run directories ──────────────────────────────────────────
-DATE_TAG="$(date +%Y%m%d)"
+DATE_TAG="${DATE_TAG:-$(date +%Y%m%d)}"
 
 # ── Helper functions ──────────────────────────────────────────────────────
 
 activate_env() {
-  if [[ -f "${CONDA_SH}" ]]; then
+  if [[ -x "${MICROMAMBA_EXE}" ]]; then
+    eval "$("${MICROMAMBA_EXE}" shell hook --shell bash --root-prefix "${MICROMAMBA_ROOT_PREFIX}")"
+    micromamba activate "${CONDA_ENV}"
+  elif [[ -f "${CONDA_SH}" ]]; then
     source "${CONDA_SH}"
     conda activate "${CONDA_ENV}"
   fi
+  export CUDA_HOME="${CONDA_PREFIX}"
+  # cudnn wheel lib path (needed by TE/mbridge after conda cudnn removal, §5 pitfall)
+  local cudnn_lib="${CONDA_PREFIX}/lib/python3.12/site-packages/nvidia/cudnn/lib"
+  [[ -d "${cudnn_lib}" ]] && export LD_LIBRARY_PATH="${cudnn_lib}:${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 }
 
 get_pythonpath() {
@@ -213,3 +222,7 @@ echo "DATA_DIR     = ${DATA_DIR}"
 echo "MODEL_DIR    = ${MODEL_DIR}"
 echo "OUTPUT_ROOT  = ${OUTPUT_ROOT}"
 echo "ALL_RUNS     = ${#ALL_RUNS[@]} (mask,ratio) combos × 3 seeds = $((${#ALL_RUNS[@]} * 3)) total"
+
+get_torch_lib() {
+  python3 -c 'from pathlib import Path; import torch; print(Path(torch.__file__).resolve().parent / "lib")'
+}

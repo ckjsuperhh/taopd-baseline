@@ -99,24 +99,13 @@ export CUDA_HOME="$CONDA_PREFIX"
 echo "✅ activated: ${ENV_NAME}"
 echo "   CUDA_HOME = ${CUDA_HOME}"
 
-# 注: 整包 `cuda` 在 nvidia/label/cuda-12.9.1 channel 用 libmamba 解算会冲突 (__win marker)
-# 但 transformer_engine / apex / flash-attn 编译需要全套 CUDA dev headers,
-# 所以逐个装必需 dev 包, 任何一组失败就 fallback 到 conda-forge
-CUDA_CHANNEL="nvidia/label/cuda-12.9.1"
-micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
+# conda-forge 用 cuda-version=12.9 统一 pin (nvidia/label/cuda-12.9.1 已更新到 13.x 会冲突)
+micromamba install -n "${ENV_NAME}" -c conda-forge -y \
+  cuda-version=12.9 \
   cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-nvtx-dev cuda-profiler-api \
   libcusparse-dev libcublas-dev libcufft-dev libcurand-dev libcusolver-dev \
-  cuda-nvrtc-dev cuda-cccl cuda-crt \
-  || micromamba install -n "${ENV_NAME}" -c "${CUDA_CHANNEL}" -y \
-      cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-profiler-api \
-      libcusparse-dev libcublas-dev libcufft-dev libcurand-dev \
-  || {
-    echo "⚠ ${CUDA_CHANNEL} 解算失败, 试 conda-forge"
-    micromamba install -n "${ENV_NAME}" -c conda-forge -y \
-      cuda-nvcc cuda-cudart-dev cuda-nvtx cuda-profiler-api \
-      cusparse cusolver cublas cufft curand
-  }
-micromamba install -n "${ENV_NAME}" -c conda-forge cudnn -y
+  cuda-nvrtc-dev cuda-cccl cuda-crt
+micromamba install -n "${ENV_NAME}" -c conda-forge -y cudnn
 
 # ── Step 3: cuda-python + torch 2.9.1+cu129 ────────────────────────────
 echo ""
@@ -204,7 +193,9 @@ pip install -e .
 
 # cudnn + numpy pin (https://github.com/pytorch/pytorch/issues/168167)
 pip install nvidia-cudnn-cu12==9.16.0.29
-pip install "numpy<2"
+# Remove conda cudnn to avoid symbol conflicts with pip wheel (§5 pitfall)
+micromamba remove -n "${ENV_NAME}" cudnn libcudnn libcudnn-dev -y 2>/dev/null || true
+pip install "numpy==2.0.2"
 
 # Apply patches
 echo ""

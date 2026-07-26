@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
+# TAOPD_ADAPT_V1: adapted for sglang 0.5.10 + torch 2.9 (native Qwen3)
 set -eo pipefail  # 不能用 -u：conda 内部 deactivate 脚本有 unbound variable
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/00_env.sh"
 activate_env
 
 # Patch Qwen3 dense → Qwen2 config (sglang 0.4.1 不知道 Qwen3ForCausalLM)
-bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
+# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3, 不再需要 Qwen3→Qwen2 伪装 patch
+# bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
 
 # Patch sglang 的 Qwen2Attention (让 Qwen3 的 q_norm/k_norm 能被 load_weights 吃下)
-bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
+# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3 q_norm/k_norm, 不再 monkey-patch
+# bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
 
 echo "========================================="
 echo " Step 7: Diagnostic runs (heldout + gsm8k)"
@@ -18,6 +21,7 @@ export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
 CONDA_LIB="$(get_conda_lib)"
 export LD_LIBRARY_PATH="${CONDA_LIB}:${TORCH_CUDA_LIB}:${LD_LIBRARY_PATH:-}"
+CUDA_STUBS="${CONDA_PREFIX}/targets/x86_64-linux/lib/stubs"
 export PYTHONBUFFERED=16
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_CUMEM_ENABLE=0
@@ -31,8 +35,8 @@ _wait_ray_job() {
   while true; do
     local out
     out="$(ray job status --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>&1 || true)"
-    if echo "${out}" | grep -q "Status for job.*: SUCCEEDED"; then return 0; fi
-    if echo "${out}" | grep -q "Status for job.*: FAILED\|Status for job.*: STOPPED"; then
+    if echo "${out}" | grep -qiE "(Status for job.*: SUCCEEDED|succeeded)"; then return 0; fi
+    if echo "${out}" | grep -qiE "(Status for job.*: FAILED|Status for job.*: STOPPED|failed|stopped)"; then
       ray job logs --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>/dev/null | tail -100 >&2 || true
       return 1
     fi
@@ -75,7 +79,7 @@ run_diagnostic() {
   echo "  Starting teacher..."
   CUDA_VISIBLE_DEVICES="${teacher_gpu}" python3 -m sglang.launch_server \
     --model-path "${TEACHER_MODEL}" --host 0.0.0.0 --port "${TEACHER_PORT}" \
-    --dist-init-addr "127.0.0.1:${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
+    --nccl-port "${TEACHER_NCCL_PORT}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${DIAG_TEACHER_MEM_FRACTION}" \
     --cuda-graph-max-bs "${DIAG_TEACHER_CUDA_GRAPH_MAX_BS}" \
     --attention-backend triton \
@@ -107,7 +111,7 @@ run_diagnostic() {
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${RAY_DASHBOARD_PORT}" \
     --submission-id "${job_id}" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"LIBRARY_PATH\":\"${CUDA_STUBS}:${LIBRARY_PATH:-}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node 2 --rollout-num-gpus 1 \
     --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
@@ -152,7 +156,7 @@ run_diagnostic() {
     --sglang-cuda-graph-max-bs "${DIAG_SGLANG_CUDA_GRAPH_MAX_BS}" --sglang-enable-metrics \
     --attention-dropout 0.0 --hidden-dropout 0.0 \
     --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
-    --attention-backend flash --no-rope-fusion --transformer-impl local \
+    --attention-backend flash --no-rope-fusion \
     --no-masked-softmax-fusion --no-persist-layer-norm --no-gradient-accumulation-fusion \
     --megatron-to-hf-mode raw --no-save-optim \
     --save-debug-rollout-data "${save_dir}/debug_rollout_data/{rollout_id}.pt" \

@@ -354,8 +354,11 @@ class RolloutManager:
 
     def __init__(self, args, pg):
         import os as _os
-        with open('/tmp/kejiechen/rm_init_enter.log', 'a') as _ef:
-            _ef.write(f'ENTER pid={_os.getpid()}\n'); _ef.flush()
+        try:
+            with open('/tmp/kejiechen/rm_init_enter.log', 'a') as _ef:
+                _ef.write(f'ENTER pid={_os.getpid()}\n'); _ef.flush()
+        except Exception:
+            pass
         def _step(s):
             try:
                 with open('/tmp/kejiechen/rm_steps.log','a') as _sf:
@@ -407,9 +410,12 @@ class RolloutManager:
             _step('init complete')
         except BaseException as _exc:
             import traceback as _tb
-            with open('/tmp/kejiechen/rm_init_exc.log', 'a') as _ef:
-                _ef.write(f'pid={_os.getpid()}\n')
-                _tb.print_exc(file=_ef)
+            try:
+                with open('/tmp/kejiechen/rm_init_exc.log', 'a') as _ef:
+                    _ef.write(f'pid={_os.getpid()}\n')
+                    _tb.print_exc(file=_ef)
+            except Exception:
+                pass
             raise
 
     def _get_metrics_router_addr(self) -> str | None:

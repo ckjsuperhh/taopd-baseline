@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# TAOPD_ADAPT_V1: adapted for sglang 0.5.10 + torch 2.9 (native Qwen3)
 set -eo pipefail  # 不能用 -u：conda 内部 deactivate 脚本有 unbound variable
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/00_env.sh"
@@ -11,12 +12,14 @@ echo "========================================="
 # Patch Qwen3 dense 模型的 config.json 让 sglang 0.4.1 能加载
 # (sglang 0.4.1 2024-11 早于 Qwen3 发布, 不知道 Qwen3ForCausalLM)
 # 幂等: 只改一次, 后续重跑不会重复改
-bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
+# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3, 不再需要 Qwen3→Qwen2 伪装 patch
+# bash "${SCRIPT_DIR}/patch_qwen3_as_qwen2.sh"
 
 # Patch sglang 的 Qwen2Attention, 让它能加载 Qwen3 的 q_norm / k_norm
 # (Qwen3 多了 per-head RMSNorm 在 attention 里, Qwen2 没有 → load_weights KeyError)
 # 幂等: 已打过 patch (TAOPD_PATCH_V1 标记) 则跳过
-bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
+# [TAOPD_ADAPT_V1] sglang 0.5.10 原生支持 Qwen3 q_norm/k_norm, 不再 monkey-patch
+# bash "${SCRIPT_DIR}/patch_sglang_qwen2_for_qwen3.sh"
 
 export PYTHONPATH="$(get_pythonpath):${PYTHONPATH:-}"
 TORCH_CUDA_LIB="$(get_torch_cuda_lib)"
@@ -66,7 +69,7 @@ run_smoke() {
   echo "  Starting teacher SGLang on GPU ${teacher_gpu}..."
   CUDA_VISIBLE_DEVICES="${teacher_gpu}" python3 -m sglang.launch_server \
     --model-path "${TEACHER_MODEL}" --host 0.0.0.0 --port "${teacher_port}" \
-    --dist-init-addr "127.0.0.1:${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
+    --nccl-port "${nccl_port}" --tp 1 --chunked-prefill-size 4096 \
     --mem-fraction-static "${TEACHER_MEM_FRACTION}" --cuda-graph-max-bs "${TEACHER_CUDA_GRAPH_MAX_BS}" \
     --attention-backend triton \
     > "${LOG_DIR}/${name}_teacher.log" 2>&1 &
@@ -111,10 +114,11 @@ run_smoke() {
   fi
 
   echo "  Submitting training job (non-colocate: actor=2GPU, rollout=1GPU)..."
+  CUDA_STUBS="${CONDA_PREFIX}/targets/x86_64-linux/lib/stubs"
   CUDA_VISIBLE_DEVICES="${student_gpus}" ray job submit \
     --address="http://127.0.0.1:${dash_port}" \
     --submission-id "${job_id}" --no-wait \
-    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
+    --runtime-env-json="{\"env_vars\":{\"PYTHONPATH\":\"${PYTHONPATH}\",\"LD_LIBRARY_PATH\":\"${LD_LIBRARY_PATH}\",\"LIBRARY_PATH\":\"${CUDA_STUBS}:${LIBRARY_PATH:-}\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"NCCL_CUMEM_ENABLE\":\"0\",\"PYTORCH_CUDA_ALLOC_CONF\":\"expandable_segments:True\"}}" \
     -- python3 train.py \
     --actor-num-nodes 1 --actor-num-gpus-per-node 2 --rollout-num-gpus 1 \
     --num-gpus-per-node "${NUM_GPUS_PER_NODE}" \
@@ -142,7 +146,7 @@ run_smoke() {
     --sglang-cuda-graph-max-bs "${SGLANG_CUDA_GRAPH_MAX_BS}" --sglang-enable-metrics \
     --attention-dropout 0.0 --hidden-dropout 0.0 \
     --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
-    --attention-backend flash --no-rope-fusion --transformer-impl local \
+    --attention-backend flash --no-rope-fusion \
     --no-masked-softmax-fusion --no-persist-layer-norm --no-gradient-accumulation-fusion \
     --megatron-to-hf-mode raw --no-save-optim \
     --custom-rm-path slime.rollout.on_policy_distillation.reward_func \
@@ -154,14 +158,14 @@ run_smoke() {
   while true; do
     local status_out
     status_out="$(ray job status --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>&1 || true)"
-    if echo "${status_out}" | grep -q "Status for job.*: SUCCEEDED"; then
+    if echo "${status_out}" | grep -qiE "(Status for job.*: SUCCEEDED|succeeded)"; then
       echo "  SUCCEEDED"
       break
-    elif echo "${status_out}" | grep -q "Status for job.*: FAILED"; then
+    elif echo "${status_out}" | grep -qiE "(Status for job.*: FAILED|failed)"; then
       echo "  FAILED" >&2
       ray job logs --address="http://127.0.0.1:${dash_port}" "${job_id}" 2>/dev/null | tail -100 >&2 || true
       return 1
-    elif echo "${status_out}" | grep -q "Status for job.*: STOPPED"; then
+    elif echo "${status_out}" | grep -qiE "(Status for job.*: STOPPED|stopped)"; then
       echo "  STOPPED" >&2
       return 1
     fi

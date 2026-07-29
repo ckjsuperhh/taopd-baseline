@@ -25,6 +25,15 @@
 - [~] apex-llm 环境构建：已装好 conda `ta_opd` + nvcc 12.4 + torch 2.5.1+cu124 + **flash-attn 2.7.4.post1（[OK]）**；sglang / Megatron-LM clone+patch / apex 编译待续跑（脚本幂等，重跑自动跳过已完成步骤）。
 - [ ] 4090 上权重转换、冒烟、评测：未开始（需 4090 机器亲自跑）。
 
+### 当前进度（2026-07-29 更新 · 本机 8×4090 直接续跑评测）
+- [x] 训练阶段（smoke / main_sweep 84 runs / diagnostics）此前已完成；权重转换（torch_dist→HF）**经查已存在**（main_sweep 多数 run 有 `fixed_context/student_hf`）。
+- [x] 评测环境 `lmeval` 已建：torch 2.5.1+cu124 + lm-eval 0.4.12；额外补装 `langdetect immutabledict math-verify`，并修 aime YAML `max_gen_toks` 32768→16384、加 `--confirm_run_unsafe_code`（否则 ifeval/humaneval/aime 必失败）。
+- [x] `指令_下游评测_ta_opd.txt` 已更新为 **6 方法 × 5 seed**（base/pure_opd@10%/ta_opd@0.5%/entropy@1%/tip@1%/ta_opd_entropy@1%），5 可下载基准；GPQA 因无 HF_TOKEN 暂挂。
+- [~] **Step 8 下游评测：进行中**（8 卡并行，30 次评测；监控 `/tmp/watch_eval.sh`，DONE=30/30 即完成）。
+- [ ] Step 9 聚合：`aggregate_table3.py` 待评测完成后执行，产出 `summary_table3.md/csv`。
+- [ ] 文档（本文件 §9、评测补全指南 §G）待 Step 8/9 完成后补「已完成」结论。
+- [ ] 复现完整论文 10% 行：需在训练机补跑 5 方法 @10%（~300 轮）——本机评测只覆盖各方法可用最高 budget。
+
 ### 踩坑记录（必读，避免重蹈）
 1. **torch 与 nvcc 必须同版本**：torch 2.5.1+cu124 必须配 nvcc 12.4；错配（如 nvcc 12.9 / torch 2.13 cu13）会让 apex/flash-attn 编出 cu13 ABI，导入报 `undefined symbol: _ZN3c104cuda29c10_cuda_check_implementation...`。
 2. **requirements.txt 偷升 torch**：`TA-OPD/requirements.txt` 第 4 行是裸 `torch`，PHASE5 的 `pip install -r` 会升到 2.13.0(cu13)。已用 `PIP_CONSTRAINT=torch==2.5.1+cu124` + `PIP_EXTRA_INDEX_URL=.../cu124` 锁死（cu124 本地版本号只在该索引有，PyPI 没有）。
@@ -234,3 +243,14 @@ fixed-context diagnostic：冻结学生生成的上下文，在训练前后对�
 - `TA-OPD/tools/convert_torch_dist_to_hf*.py` — torch_dist→HF
 - `TA-OPD/scripts/eval/`、`TA-OPD/scripts/diagnostics/` — 评测与诊断入口
 - 核心实现：`slime_ta_opd/slime/rollout/on_policy_distillation.py`、`tip_compat.py`、`slime/ray/rollout.py`
+
+---
+
+## 9. 进度总结与评测补全（2026-07-28 更新）
+
+> 训练阶段已全部完成，但下游 6 基准评测（Table 3）尚未跑。
+> 详见 **`实验进度总结与评测补全指南.md`**（同目录），包含：
+> - 已完成产物清单（smoke test / main sweep 84 runs / diagnostics）
+> - 与论文 Table 3/4 的逐项对比（缺什么）
+> - 新 GPU 虚拟机上的完整评测步骤（环境搭建 → 权重转换 → lm-eval 评测 → 聚合出表）
+> - 预估资源与时间（单卡 4090，1-2 天可完成最小方案）

@@ -254,3 +254,10 @@ fixed-context diagnostic：冻结学生生成的上下文，在训练前后对�
 > - 与论文 Table 3/4 的逐项对比（缺什么）
 > - 新 GPU 虚拟机上的完整评测步骤（环境搭建 → 权重转换 → lm-eval 评测 → 聚合出表）
 > - 预估资源与时间（单卡 4090，1-2 天可完成最小方案）
+
+
+### G.5 评测完成与聚合（2026-07-30）
+- 下游评测已完整跑完 **6 方法 × 5 eval seed = 30 次**（5 个可下载基准；GPQA-Diamond 仍因本机无 HF_TOKEN 暂缺，待补）。
+- 并发已修正为**严格 8 卡、每卡 1 个实例**（分批启动 + 整批 wait），消除多实例显存叠加导致的 CUDA OOM；aime24/25 的 max_gen_toks=4096，并开启 PYTORCH_CUDA_ALLOC_CONF=expandable_segments。
+- 聚合结果见 `outputs/downstream_eval/summary_table3.md` / `.csv`（mean±std over 5 seeds）。
+- 重要修正：**本机实为 ~48GB 卡（非文档早先所写 8×4090）**；各方法 budget 非统一（pure_opd 10%，其余 0.5–1%），聚合表已按各方法可用最高 budget 标注，与论文统一 10% 不可直接横向比较。

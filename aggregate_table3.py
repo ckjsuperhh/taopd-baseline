@@ -38,10 +38,15 @@ PCT_TASKS = {"aime24", "aime25", "gpqa_diamond", "humaneval", "ifeval", "hendryc
 
 
 def grab(task, res):
-    for k in res:
-        if k in ("exact_match", "acc", "acc_norm", "pass@1", "humaneval_pass@1",
-                 "prompt_level_strict_acc", "inst_level_strict_acc"):
-            return k, res[k]
+    # lm-eval 0.4.x 指标键会带聚合后缀, 如 "exact_match,none" / "pass@1,create_test"
+    # 用 "cand," 前缀匹配, 同时排除 "cand_stderr,..." (以 _stderr 接续, 不会误中)
+    for c in ("exact_match", "acc", "acc_norm", "pass@1", "humaneval_pass@1",
+              "prompt_level_strict_acc", "inst_level_strict_acc"):
+        if c in res:
+            return c, res[c]
+        for k in res:
+            if k.startswith(c + ","):
+                return k, res[k]
     return None, None
 
 
@@ -61,7 +66,7 @@ rows = {}
 for mname, budget in MODELS:
     rows[mname] = {"budget": budget, "vals": {t[1]: [] for t in BENCH}}
     for s in SEEDS:
-        files = sorted((EVAL_ROOT / mname / f"seed{s}").glob("results_*.json"))
+        files = sorted((EVAL_ROOT / mname / f"seed{s}").rglob("results_*.json"))
         if not files:
             continue
         try:

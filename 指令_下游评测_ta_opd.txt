@@ -25,6 +25,7 @@ export HF_HOME=${EXISTING_ROOT}/data/hf_cache
 export HF_HUB_CACHE=${HF_HOME}/hub
 export HF_DATASETS_CACHE=${HF_HOME}/datasets
 export HF_ALLOW_CODE_EVAL=1   # humaneval 的 code_eval 指标需要执行生成代码
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True   # 减少多实例共享 GPU 时的显存碎片 OOM
 
 # 5 个可下载基准 (gpqa_diamond 因 gated 暂略)
 TASKS="aime24,aime25,humaneval,ifeval,hendrycks_math500"
@@ -48,7 +49,7 @@ echo "[prefetch] 下载 5 个基准数据集 ..."
 CUDA_VISIBLE_DEVICES=0 lm-eval --model hf \
   --model_args "pretrained=${STUDENT_HF},dtype=bfloat16,trust_remote_code=True" \
   --tasks ${TASKS} --device cuda:0 --batch_size auto --seed 0 --limit 1 \
-  --confirm_run_unsafe_code \
+  --confirm_run_unsafe_code --cache_requests \
   --output_path ${EVAL_ROOT}/_prefetch >/dev/null 2>&1 || true
 echo "[prefetch] 完成 (忽略 limit 警告)"
 
@@ -62,7 +63,7 @@ run_one() {
   CUDA_VISIBLE_DEVICES="${gpu}" lm-eval --model hf \
     --model_args "pretrained=${model},dtype=bfloat16,trust_remote_code=True" \
     --tasks ${TASKS} --device cuda:0 --batch_size auto --seed ${seed} \
-    --confirm_run_unsafe_code \
+    --confirm_run_unsafe_code --cache_requests \
     --output_path "${dir}" > "${dir}/run.log" 2>&1
   local ec=$?
   if [ ${ec} -eq 0 ]; then date '+%F_%T' > "${done}"; echo "[OK] ${name} seed${seed}"; else echo "[FAIL] ${name} seed${seed} ec=${ec}"; fi

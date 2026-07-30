@@ -48,7 +48,7 @@ mkdir -p ${EVAL_ROOT}
 echo "[prefetch] 下载 5 个基准数据集 ..."
 CUDA_VISIBLE_DEVICES=0 lm-eval --model hf \
   --model_args "pretrained=${STUDENT_HF},dtype=bfloat16,trust_remote_code=True" \
-  --tasks ${TASKS} --device cuda:0 --batch_size auto --seed 0 --limit 1 \
+  --tasks ${TASKS} --device cuda:0 --batch_size 8 --seed 0 --limit 1 \
   --confirm_run_unsafe_code --cache_requests \
   --output_path ${EVAL_ROOT}/_prefetch >/dev/null 2>&1 || true
 echo "[prefetch] 完成 (忽略 limit 警告)"
@@ -77,15 +77,23 @@ for entry in "${MODELS[@]}"; do
   for s in "${SEEDS[@]}"; do jobs+=("${mname}|${mpath}|${s}"); done
 done
 
-# ---- 并行执行 (最多 8 卡并发) ----
-MAX=8; gi=0
-for j in "${jobs[@]}"; do
-  gpu=$((gi % 8)); gi=$((gi+1))
-  IFS='|' read -r mname mpath s <<< "${j}"
-  run_one "${mname}" "${gpu}" "${mpath}" "${s}" &
-  if [ $((gi % MAX)) -eq 0 ]; then wait -n 2>/dev/null || true; fi
+# ---- 并行执行 (严格 8 卡并发：每卡同一时刻只跑 1 个，避免显存叠加 OOM) ----
+# 旧版用 wait -n 仅等一个就继续投新任务，导致 30 个任务在 8 卡上堆叠 (~4/卡) 触发 OOM。
+# 现改为「分批 + 整批 wait」：每批最多 MAX 个 (每卡 1 个)，整批跑完再进下一批。
+MAX=8
+total=${#jobs[@]}
+for ((i=0; i<total; i+=MAX)); do
+  batch=("${jobs[@]:i:MAX}")
+  echo "[round $((i/MAX+1))] 启动 ${#batch[@]} 个 (共 ${total} 个)"
+  gi=0
+  for j in "${batch[@]}"; do
+    gpu=$((gi % MAX)); gi=$((gi+1))
+    IFS='|' read -r mname mpath s <<< "${j}"
+    run_one "${mname}" "${gpu}" "${mpath}" "${s}" &
+  done
+  wait   # 等本批 8 卡全部完成再进下一批，确保每卡同时只跑一个
+  echo "[round $((i/MAX+1))] 完成"
 done
-wait
 echo "===== 评测完成 (5 基准: ${TASKS}) ====="
 
 # ===== GPQA 补跑说明（待 HF_TOKEN 就绪后执行）=====

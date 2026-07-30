@@ -62,7 +62,7 @@ run_one() {
   echo "[$(date +%T)] START ${name} seed=${seed} gpu=${gpu}"
   CUDA_VISIBLE_DEVICES="${gpu}" lm-eval --model hf \
     --model_args "pretrained=${model},dtype=bfloat16,trust_remote_code=True" \
-    --tasks ${TASKS} --device cuda:0 --batch_size auto --seed ${seed} \
+    --tasks ${TASKS} --device cuda:0 --batch_size 8 --seed ${seed} \
     --confirm_run_unsafe_code --cache_requests \
     --output_path "${dir}" > "${dir}/run.log" 2>&1
   local ec=$?

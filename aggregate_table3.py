@@ -69,11 +69,19 @@ for mname, budget in MODELS:
         files = sorted((EVAL_ROOT / mname / f"seed{s}").rglob("results_*.json"))
         if not files:
             continue
-        try:
-            data = json.loads(files[-1].read_text())
-        except Exception:
+        # 合并同一 seed 下的多个 results_*.json (评测拆分为 math/aime/other 三次调用)
+        results = {}
+        ok = False
+        for f in files:
+            try:
+                data = json.loads(f.read_text())
+            except Exception:
+                continue
+            ok = True
+            for task, sub in data.get("results", {}).items():
+                results[task] = sub   # 各子目录任务不重叠, 同名以最后写入者为准
+        if not ok:
             continue
-        results = data.get("results", {})
         for _, task, _ in BENCH:
             sub = results.get(task, {})
             if isinstance(sub, dict):

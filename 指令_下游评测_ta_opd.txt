@@ -10,6 +10,10 @@
 #   - GPQA-Diamond (Idavidrein/gpqa) 为 gated 数据集，需要 HF token。
 #     本机当前无 HF_TOKEN，故先评 5 个可下载基准；GPQA 待 token 就绪后单独补跑再聚合
 #     (见文件末尾注释块)。
+#   - 2026-07-31 更新: 改为 few-shot 评测 (MATH-500 / AIME 用 --num_fewshot 4, 带 \boxed{} 示例)。
+#     原因: 学生为 Qwen3-1.7B-Base, 0-shot 时 MATH-500 exact_match≈0.4%、AIME≈0
+#     (base 模型不输出 \boxed{} 答案), 属评测协议问题而非方法问题。few-shot 调用失败会自动回退 0-shot。
+#     重跑前请先清旧产物: `FORCE_RERUN=1 bash 指令_下游评测_ta_opd.txt` (会删除既有 seed 目录)。
 # 环境: conda env=lmeval ; 数据集缓存置于 dk/data/hf_cache
 set -uo pipefail
 source /opt/conda/etc/profile.d/conda.sh
@@ -53,20 +57,42 @@ CUDA_VISIBLE_DEVICES=0 lm-eval --model hf \
   --output_path ${EVAL_ROOT}/_prefetch >/dev/null 2>&1 || true
 echo "[prefetch] 完成 (忽略 limit 警告)"
 
+# 单次 lm-eval 调用; 参数: gpu model seed tasks extra out log
+run_lmeval() {
+  local gpu="$1" model="$2" seed="$3" tasks="$4" extra="$5" out="$6" log="$7"
+  mkdir -p "${out}"
+  CUDA_VISIBLE_DEVICES="${gpu}" lm-eval --model hf \
+    --model_args "pretrained=${model},dtype=bfloat16,trust_remote_code=True" \
+    --tasks "${tasks}" ${extra} \
+    --device cuda:0 --batch_size 8 --seed "${seed}" \
+    --confirm_run_unsafe_code --cache_requests \
+    --output_path "${out}" > "${log}" 2>&1
+  return $?
+}
+
 run_one() {
   local name="$1" gpu="$2" model="$3" seed="$4"
   local dir="${EVAL_ROOT}/${name}/seed${seed}"
-  local done="${dir}/DONE"
-  [ -f "${done}" ] && { echo "[skip] ${name} seed${seed}"; return; }
+  # FORCE_RERUN=1 时强制清掉旧目录 (旧 0-shot 顶层 results 会与新的 few-shot 子目录混在一起聚合)
+  if [ -n "${FORCE_RERUN:-}" ]; then rm -rf "${dir}"; fi
+  [ -f "${dir}/DONE" ] && { echo "[skip] ${name} seed${seed}"; return; }
   mkdir -p "${dir}"
+  # 清掉上一次协议的残留产物, 避免新旧结果混合
+  rm -rf "${dir}/fs_math" "${dir}/fs_aime" "${dir}/default_other" "${dir}"/results_*.json "${dir}"/run_*.log
   echo "[$(date +%T)] START ${name} seed=${seed} gpu=${gpu}"
-  CUDA_VISIBLE_DEVICES="${gpu}" lm-eval --model hf \
-    --model_args "pretrained=${model},dtype=bfloat16,trust_remote_code=True" \
-    --tasks ${TASKS} --device cuda:0 --batch_size 8 --seed ${seed} \
-    --confirm_run_unsafe_code --cache_requests \
-    --output_path "${dir}" > "${dir}/run.log" 2>&1
-  local ec=$?
-  if [ ${ec} -eq 0 ]; then date '+%F_%T' > "${done}"; echo "[OK] ${name} seed${seed}"; else echo "[FAIL] ${name} seed${seed} ec=${ec}"; fi
+  local ec=0
+  # (A) MATH-500: 必须 few-shot (带 \boxed{} 示例), 否则 base 模型 0-shot 几乎全错 -> 失败回退 0-shot
+  run_lmeval "${gpu}" "${model}" "${seed}" "hendrycks_math500" "--num_fewshot 4 --fewshot_as_seed" "${dir}/fs_math" "${dir}/run_math.log" \
+    || run_lmeval "${gpu}" "${model}" "${seed}" "hendrycks_math500" "" "${dir}/fs_math" "${dir}/run_math.log"
+  ec=$((ec + $?))
+  # (B) AIME24/25: 尝试 few-shot, 失败回退 0-shot
+  run_lmeval "${gpu}" "${model}" "${seed}" "aime24,aime25" "--num_fewshot 4 --fewshot_as_seed" "${dir}/fs_aime" "${dir}/run_aime.log" \
+    || run_lmeval "${gpu}" "${model}" "${seed}" "aime24,aime25" "" "${dir}/fs_aime" "${dir}/run_aime.log"
+  ec=$((ec + $?))
+  # (C) HumanEval / IFEval: 默认协议 (代码/指令遵循, 0-shot 即可)
+  run_lmeval "${gpu}" "${model}" "${seed}" "humaneval,ifeval" "" "${dir}/default_other" "${dir}/run_other.log"
+  ec=$((ec + $?))
+  if [ ${ec} -eq 0 ]; then date '+%F_%T' > "${dir}/DONE"; echo "[OK] ${name} seed${seed}"; else echo "[FAIL] ${name} seed${seed} ec=${ec}"; fi
 }
 
 # ---- 构建任务队列 ----
@@ -104,3 +130,15 @@ echo "===== 评测完成 (5 基准: ${TASKS}) ====="
 #     --tasks gpqa_diamond --device cuda:0 --batch_size auto --seed <S> \
 #     --output_path ${EVAL_ROOT}/<name>/seed<S>
 # 然后更新聚合脚本把 gpqa_diamond 也纳入 (BENCH_TASK 增加 gpqa_diamond)。
+
+# ===== 验证 few-shot 是否生效（正式跑全量前先确认 MATH-500 从 ~0.4% 回升）=====
+# 跑 base 一个 seed 的 MATH-500 (limit 10) 看 exact_match 是否进入合理区间 (>10 即说明 \boxed{} 抽取正常):
+#   CUDA_VISIBLE_DEVICES=0 lm-eval --model hf \
+#     --model_args "pretrained=${STUDENT_HF},dtype=bfloat16,trust_remote_code=True" \
+#     --tasks hendrycks_math500 --num_fewshot 4 --fewshot_as_seed \
+#     --device cuda:0 --batch_size 8 --seed 0 --limit 10 \
+#     --confirm_run_unsafe_code --output_path /tmp/verify_math
+#   cat /tmp/verify_math/*/results_*.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['results']['hendrycks_math500'])"
+# 若仍接近 0, 说明 few-shot 未生效或模型未输出 \boxed{}, 需换用 --apply_chat_template / 自定义 prompt 模板。
+# 全量重跑前建议先清空旧产物:
+#   FORCE_RERUN=1 bash 指令_下游评测_ta_opd.txt

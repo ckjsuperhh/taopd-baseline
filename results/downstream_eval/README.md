@@ -3,6 +3,16 @@
 This folder holds the downstream-evaluation results of the TA-OPD baseline
 reproduction run performed in this environment.
 
+> ⚠️ **已知问题：当前结果暂不可信，待重修（will re-run）。**
+> 学生模型为 Qwen3-1.7B-**Base**，原评测为 **0-shot、无 system prompt / chat template**；
+> 数学题（MATH-500、AIME）要求生成 `\boxed{}` 答案，而 base 模型 0-shot 几乎不输出该格式，
+> 导致 MATH-500≈0.4%、AIME≈0（这是**评测协议问题，不是方法/模型能力问题**），IFEval 也因协议偏低。
+> 此外各方法 budget 非统一（仅 pure_opd 到 10%，其余 0.5–1%），且只跑了 4B→1.7B 一组，
+> 不能与论文统一 10% 的 Table 3 直接横比。
+> **计划**：评测改为 few-shot（`--num_fewshot 4`，见 `指令_下游评测_ta_opd.txt`），
+> 并视情况把训练 budget 补到 10%/30%/50% 后重训重评，再下结论。GPQA-D 仍待 HF_TOKEN。
+> 下表数字仅作管线打通记录，**不要据此判断 TA-OPD 是否有效**。
+
 ## What was evaluated
 
 - **6 method configurations × 5 eval seeds = 30 runs** (see method table below).

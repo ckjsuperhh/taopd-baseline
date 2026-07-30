@@ -129,6 +129,38 @@ cp ta_opd/slime_patch/slime/rollout/on_policy_distillation.py /path/to/slime-mai
 For exact reproducibility, prefer `slime_ta_opd/`, because it contains the full
 modified training tree and launch scripts.
 
+## Downstream evaluation results (baseline reproduction)
+
+The TA-OPD baseline was reproduced end-to-end in a local environment and
+evaluated on five downloadable benchmarks. Raw outputs and the aggregated
+table live under [`results/downstream_eval/`](../results/downstream_eval).
+
+| Method (paper alias) | Budget | AIME24 | AIME25 | HumanEval | IFEval | MATH-500 | GPQA-D |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Base (no distillation) | — | 0.00 | 3.33 | 51.83 | 22.18 | 0.40 | n/a |
+| Full OPD | 10% | 0.00 | 0.00 | 41.46 | 17.56 | 0.00 | n/a |
+| TA-OPD | 0.5% | 0.00 | 0.00 | 40.24 | 15.82 | 0.00 | n/a |
+| Entropy-only | 1% | 3.33 | 6.67 | 40.24 | 16.52 | 0.00 | n/a |
+| TIP-style | 1% | 3.33 | 3.33 | 41.46 | 16.52 | 0.00 | n/a |
+| TA-OPD + Entropy | 1% | 3.33 | 6.67 | 38.41 | 16.27 | 0.00 | n/a |
+
+Numbers are percentages, mean over 5 eval seeds; full mean ± std are in
+[`results/downstream_eval/summary_table3.csv`](../results/downstream_eval/summary_table3.csv).
+
+**Caveats (read before comparing to the paper):**
+
+- *Budgets are not uniform.* The paper reports all methods at a uniform 10%
+  budget; in this run only `pure_opd` reached 10%, while the others were only
+  trained to 0.5–1.0%. Each row above uses that method's highest locally
+  available budget, so the table is **not directly comparable** to the paper's
+  uniform-budget Table 3.
+- *GPQA-Diamond is missing* (`n/a`): it is a gated HF dataset
+  (`Idavidrein/gpqa`) requiring an `HF_TOKEN` with access granted. Provide the
+  token and re-run `--tasks gpqa_diamond` for the 30 (model, seed) pairs to fill
+  the column.
+- *Setup*: teacher Qwen3-4B → student Qwen3-1.7B-Base, `lm-eval` 0.4.12,
+  8 × ~48 GB GPUs, one instance per GPU, `--batch_size 8`.
+
 ## License and attribution
 
 This repository includes code derived from slime and interfaces with
